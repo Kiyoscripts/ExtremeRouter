@@ -137,6 +137,11 @@ import p134 from "./qwen-cloud-token-plan.js";
 import p135 from "./alibaba.js";
 import p136 from "./alibaba-cn.js";
 import p137 from "./hcnsec.js";
+import p138 from "./inxorastudio.js";
+import p139 from "./inxorastudio-web.js";
+import p140 from "./bynara.js";
+import p141 from "./infron.js";
+import p142 from "./agentrouter.js";
 
 export default [
   p0,
@@ -277,4 +282,9 @@ export default [
   p135,
   p136,
   p137,
+  p138,
+  p139,
+  p140,
+  p141,
+  p142,
 ];

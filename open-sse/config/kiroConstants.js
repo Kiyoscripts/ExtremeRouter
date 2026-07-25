@@ -16,6 +16,7 @@
  */
 
 import { extractThinking } from "../translator/concerns/thinkingUnified.js";
+import { parseSuffix } from "../translator/concerns/thinkingUnified.js";
 import { effortToBudget } from "../translator/concerns/thinking.js";
 
 export const KIRO_AGENTIC_SUFFIX = "-agentic";
@@ -232,6 +233,83 @@ export function resolveKiroModel(model) {
     upstream = stripThinkingSuffix(upstream);
   }
   return { upstream, agentic, thinking };
+}
+
+/**
+ * Resolve the per-family effort path for a Kiro upstream model id.
+ *
+ * Kiro upstream (CodeWhisperer) accepts native effort fields ONLY for specific
+ * model families. Other families (legacy Claude 4.5, GLM, DeepSeek, Qwen,
+ * MiniMax) reject native effort as REQUEST_BODY_INVALID — their reasoning flows
+ * solely via the `<thinking_mode>` system tag injection.
+ *
+ * Returns one of:
+ *   - "kiro-claude"  → Claude 5 family (Sonnet 5, Haiku 5, Opus 5)
+ *   - "kiro-gpt"     → GPT-5.6 family (Sol, Terra, Luna)
+ *   - null           → not supported (tag-only reasoning)
+ *
+ * @param {string} upstreamModel - clean upstream id (after resolveKiroModel)
+ * @returns {string|null}
+ */
+export function resolveKiroEffortPath(upstreamModel) {
+  if (typeof upstreamModel !== "string" || !upstreamModel) return null;
+  const lower = upstreamModel.toLowerCase();
+  // Claude 5 family (NOT Claude 4.x — those are legacy and reject native effort).
+  // Match claude-{opus,sonnet,haiku}-5 explicitly to exclude 4.5/4.6/etc.
+  if (/^claude-(opus|sonnet|haiku)-5(\b|$|-)/.test(lower)) return "kiro-claude";
+  // GPT-5.6 family.
+  if (/^gpt-5\.6-/.test(lower)) return "kiro-gpt";
+  return null;
+}
+
+/**
+ * Resolve a Kiro model id after consuming the generic `model(level)` suffix
+ * that the dashboard thinking-level picker appends.
+ *
+ * The suffix is an ExtremeRouter request override (parsed by parseSuffix),
+ * NOT part of Kiro's upstream model id. We strip it before resolving synthetic
+ * variants (-thinking / -agentic) so the upstream modelId stays clean.
+ *
+ * @param {string} model
+ * @returns {{ model: string, upstream: string, agentic: boolean, thinking: boolean, thinkingOverride: object|null }}
+ */
+export function resolveKiroModelIntent(model) {
+  const { cleanModel, override } = parseSuffix(model);
+  return {
+    model: cleanModel,
+    ...resolveKiroModel(cleanModel),
+    thinkingOverride: override,
+  };
+}
+
+/**
+ * Apply a parsed `model(level)` override to a request body without mutating the
+ * caller's body. Translates the override into the appropriate thinking shape so
+ * downstream consumers (resolveKiroThinkingBudget, the system-tag injector) see
+ * a consistent intent regardless of whether it came from the body fields or the
+ * model-name suffix.
+ *
+ * @param {object} body
+ * @param {object|null} override - { mode: "level"|"budget"|"auto"|"none", ... }
+ * @returns {object} new body with thinking fields set
+ */
+export function applyKiroThinkingOverride(body, override) {
+  if (!override) return body;
+
+  const next = { ...body };
+  if (override.mode === "budget") {
+    delete next.output_config;
+    delete next.reasoning_effort;
+    delete next.reasoning;
+    next.thinking = { type: "enabled", budget_tokens: override.budget };
+    return next;
+  }
+
+  next.output_config = {
+    ...(body.output_config || {}),
+    effort: override.mode === "level" ? override.level : override.mode,
+  };
+  return next;
 }
 
 /**

@@ -81,9 +81,12 @@ startCacheCleanup();
  *
  * @param {string} connectionId - The connection identifier for cache keying
  * @param {string} accessToken  - Valid OAuth access token
+ * @param {string} [provider="gemini-cli"] - Provider id; selects the right
+ *   Cloud Code Assist endpoints (gemini-cli uses cloudcode-pa, antigravity
+ *   uses daily-cloudcode-pa). See CLOUD_CODE_API in appConstants.js.
  * @returns {Promise<string|null>} Real project ID or null
  */
-export async function getProjectIdForConnection(connectionId, accessToken) {
+export async function getProjectIdForConnection(connectionId, accessToken, provider = "gemini-cli") {
     if (!connectionId || !accessToken) return null;
 
     // Return cached value if still fresh
@@ -102,7 +105,7 @@ export async function getProjectIdForConnection(connectionId, accessToken) {
 
     const promise = (async () => {
         try {
-            const projectId = await fetchProjectId(accessToken, controller.signal);
+            const projectId = await fetchProjectId(accessToken, controller.signal, provider);
             if (projectId) {
                 projectIdCache.set(connectionId, {projectId, fetchedAt: Date.now()});
                 return projectId;
@@ -155,8 +158,9 @@ export function removeConnection(connectionId) {
  * @param {AbortSignal} signal
  * @returns {Promise<string|null>}
  */
-async function fetchProjectId(accessToken, signal) {
-    const response = await fetch(CLOUD_CODE_API.loadCodeAssist, {
+async function fetchProjectId(accessToken, signal, provider) {
+    const endpoints = CLOUD_CODE_API[provider] || CLOUD_CODE_API["gemini-cli"];
+    const response = await fetch(endpoints.loadCodeAssist, {
         method: "POST",
         headers: { ...LOAD_CODE_ASSIST_HEADERS, "Authorization": `Bearer ${accessToken}` },
         body: JSON.stringify({ metadata: LOAD_CODE_ASSIST_METADATA }),
@@ -185,7 +189,7 @@ async function fetchProjectId(accessToken, signal) {
         }
     }
 
-    return onboardUser(accessToken, tierID, signal);
+    return onboardUser(accessToken, tierID, signal, endpoints);
 }
 
 /**
@@ -194,9 +198,10 @@ async function fetchProjectId(accessToken, signal) {
  * @param {string}      accessToken
  * @param {string}      tierID
  * @param {AbortSignal} externalSignal  – propagated from the connection's AbortController
+ * @param {{loadCodeAssist: string, onboardUser: string}} endpoints - Cloud Code endpoints for this provider
  * @returns {Promise<string|null>}
  */
-async function onboardUser(accessToken, tierID, externalSignal) {
+async function onboardUser(accessToken, tierID, externalSignal, endpoints) {
     console.log(`[ProjectId] Onboarding user with tier: ${tierID}`);
 
     const reqBody = { tierId: tierID, metadata: LOAD_CODE_ASSIST_METADATA };
@@ -213,7 +218,7 @@ async function onboardUser(accessToken, tierID, externalSignal) {
         externalSignal?.addEventListener("abort", forwardAbort);
 
         try {
-            const response = await fetch(CLOUD_CODE_API.onboardUser, {
+            const response = await fetch(endpoints.onboardUser, {
                 method: "POST",
                 headers: { ...LOAD_CODE_ASSIST_HEADERS, "Authorization": `Bearer ${accessToken}` },
                 body: JSON.stringify(reqBody),

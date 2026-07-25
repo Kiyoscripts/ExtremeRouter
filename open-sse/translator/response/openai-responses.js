@@ -9,6 +9,7 @@ import { buildUsage } from "../concerns/usage.js";
 import { fallbackToolCallId } from "../concerns/toolCall.js";
 import { reasoningDelta, extractReasoningText } from "../concerns/reasoning.js";
 import { ROLE, OPENAI_BLOCK, RESPONSES_ITEM, OPENAI_FINISH, MODEL_FALLBACK } from "../schema/index.js";
+import { ResponsesAccumulator } from "../concerns/responsesAccumulator.js";
 
 /**
  * Translate OpenAI chunk to Responses API events
@@ -361,24 +362,35 @@ function flushEvents(state) {
   return events;
 }
 
-// currentToolCallId is intentionally sticky for the current turn so flush/completion
-  // can still finalize as tool_calls even if the tool call was emitted before stream end.
-function computeFinishReason(state) {
-   return state.toolCallIndex > 0 || state.currentToolCallId
-    ? OPENAI_FINISH.TOOL_CALLS
-    : OPENAI_FINISH.STOP;
+// Derive finish_reason from the shared accumulator state. Tool calls →
+// TOOL_CALLS; incomplete due to max_output_tokens → LENGTH; anything else →
+// STOP. Terminal failures are handled separately by the caller (they emit
+// error content + STOP).
+function computeFinishReason(acc) {
+  if (acc?.incompleteDetails?.reason === "max_output_tokens") return OPENAI_FINISH.LENGTH;
+  return acc && acc.hasTools ? OPENAI_FINISH.TOOL_CALLS : OPENAI_FINISH.STOP;
 }
 
 /**
- * Translate OpenAI Responses API chunk to OpenAI Chat Completions format
- * This is for when Codex returns data and we need to send it to an OpenAI-compatible client
+ * Translate OpenAI Responses API chunk to OpenAI Chat Completions format.
+ * Uses a shared ResponsesAccumulator for tool-call correlation (parallel/
+ * interleaved calls), exactly-once terminal output, and usage extraction.
+ *
+ * The accumulator is lazy-initialized on state so non-Responses paths pay no
+ * cost. It correlates tool calls by output_index/item_id/call_id — replacing
+ * the previous single-scalar (currentToolCallId) model that misrouted
+ * interleaved argument deltas.
  */
 export function openaiResponsesToOpenAIResponse(chunk, state) {
+  // Lazy-init the accumulator.
+  if (!state.acc) state.acc = new ResponsesAccumulator();
+  const acc = state.acc;
+
   if (!chunk) {
     // Flush: send final chunk with finish_reason
     if (state.finishReasonSent || !state.started) return null;
 
-    const finishReason = computeFinishReason(state);
+    const finishReason = computeFinishReason(acc);
 
     state.finishReasonSent = true;
     state.finishReason = finishReason;
@@ -389,8 +401,14 @@ export function openaiResponsesToOpenAIResponse(chunk, state) {
       finishReason
     );
 
-    if (state.usage && typeof state.usage === "object") {
-      finalChunk.usage = state.usage;
+    // Usage from accumulator (captured on response.completed).
+    if (acc.usage) {
+      finalChunk.usage = buildUsage({
+        promptTokens: acc.usage.input_tokens,
+        completionTokens: acc.usage.output_tokens,
+        totalTokens: acc.usage.total_tokens,
+        cachedTokens: acc.usage.cached_tokens,
+      });
     }
 
     return finalChunk;
@@ -400,14 +418,15 @@ export function openaiResponsesToOpenAIResponse(chunk, state) {
   const eventType = chunk.type || chunk.event;
   const data = chunk.data || chunk;
 
-  // Initialize state
+  // Initialize chat stream state on first chunk
   if (!state.started) {
     state.started = true;
     state.chatId = `chatcmpl-${Date.now()}`;
     state.created = Math.floor(Date.now() / 1000);
-    state.toolCallIndex = 0;
-    state.currentToolCallId = null;
   }
+
+  // Feed every event into the accumulator for correlation + terminal tracking.
+  acc.ingest(eventType, data);
 
   // Text content delta
   if (eventType === "response.output_text.delta") {
@@ -425,17 +444,21 @@ export function openaiResponsesToOpenAIResponse(chunk, state) {
     return null;
   }
 
-  // Function call started (standard function_call or custom_tool_call)
+  // Function call started (standard function_call or custom_tool_call).
+  // The accumulator registered the item on ingest; we emit the OpenAI
+  // tool_call header with the index resolved by correlation.
   if (eventType === "response.output_item.added" && (data.item?.type === RESPONSES_ITEM.FUNCTION_CALL || data.item?.type === "custom_tool_call")) {
     const item = data.item;
-    state.currentToolCallId = item.call_id || fallbackToolCallId();
+    const itemId = item.id || item.call_id || "";
+    const callId = item.call_id || fallbackToolCallId();
+    const tcIndex = acc.toolCallIndexFor(data.output_index ?? itemId);
 
     return buildChunk(
       { id: state.chatId, created: state.created, model: state.model || MODEL_FALLBACK },
       {
         tool_calls: [{
-          index: state.toolCallIndex,
-          id: state.currentToolCallId,
+          index: tcIndex,
+          id: callId,
           type: OPENAI_BLOCK.FUNCTION,
           function: { name: item.name || "", arguments: "" }
         }]
@@ -443,77 +466,78 @@ export function openaiResponsesToOpenAIResponse(chunk, state) {
     );
   }
 
-  // Function call arguments delta (standard or custom_tool_call variant)
+  // Function call arguments delta (standard or custom_tool_call variant).
+  // Route to the correct tool call via output_index/item_id correlation —
+  // the accumulator tracks which call this delta belongs to. Previously a
+  // single scalar counter was used, misrouting interleaved deltas.
   if (eventType === "response.function_call_arguments.delta" || eventType === "response.custom_tool_call_input.delta") {
     const argsDelta = data.delta || "";
     if (!argsDelta) return null;
 
+    // Resolve the tool-call index for THIS delta's item, not a global counter.
+    const key = data.output_index ?? data.item_id;
+    const tcIndex = acc.toolCallIndexFor(key);
+
     return buildChunk(
       { id: state.chatId, created: state.created, model: state.model || MODEL_FALLBACK },
-      { tool_calls: [{ index: state.toolCallIndex, function: { arguments: argsDelta } }] }
+      { tool_calls: [{ index: tcIndex, function: { arguments: argsDelta } }] }
     );
   }
 
-  // Function call done (standard or custom_tool_call variant)
+  // Function call done (standard or custom_tool_call variant).
+  // Mark emitted for exactly-once semantics — if the done event carries
+  // complete arguments we don't need to re-emit (the deltas already streamed).
   if (eventType === "response.output_item.done" && (data.item?.type === RESPONSES_ITEM.FUNCTION_CALL || data.item?.type === "custom_tool_call")) {
-    state.toolCallIndex++;
+    const itemId = data.item?.id || data.item?.call_id || "";
+    if (itemId) acc.markToolCallEmitted(itemId);
     return null;
   }
 
-  // Response completed
+  // Response completed — capture usage (already ingested) + emit final chunk.
   if (eventType === "response.completed" || eventType === "response.done") {
-    // Extract usage from response.completed event
-    const responseUsage = data.response?.usage;
-    if (responseUsage && typeof responseUsage === "object") {
-      const inputTokens = responseUsage.input_tokens || responseUsage.prompt_tokens || 0;
-      const outputTokens = responseUsage.output_tokens || responseUsage.completion_tokens || 0;
-      // OpenAI Responses API: input_tokens already includes cached_tokens
-      // Cache info is in input_tokens_details.cached_tokens
-      const cacheReadTokens = responseUsage.input_tokens_details?.cached_tokens || responseUsage.cache_read_input_tokens || 0;
-      
-      state.usage = buildUsage({ promptTokens: inputTokens, completionTokens: outputTokens, totalTokens: inputTokens + outputTokens, cachedTokens: cacheReadTokens });
-    }
-    
     if (!state.finishReasonSent) {
-      const finishReason = computeFinishReason(state);
+      const finishReason = computeFinishReason(acc);
 
       state.finishReasonSent = true;
-      state.finishReason = finishReason; // Mark for usage injection in stream.js
-      
+      state.finishReason = finishReason;
+
       const finalChunk = buildChunk(
         { id: state.chatId, created: state.created, model: state.model || MODEL_FALLBACK },
         {},
         finishReason
       );
 
-      // Include usage in final chunk if available
-      if (state.usage && typeof state.usage === "object") {
-        finalChunk.usage = state.usage;
+      if (acc.usage) {
+        finalChunk.usage = buildUsage({
+          promptTokens: acc.usage.input_tokens,
+          completionTokens: acc.usage.output_tokens,
+          totalTokens: acc.usage.total_tokens,
+          cachedTokens: acc.usage.cached_tokens,
+        });
       }
-      
+
       return finalChunk;
     }
     return null;
   }
 
-  // Error events from Responses API (e.g. model_not_found)
-  if (eventType === "error" || eventType === "response.failed") {
-    // Avoid emitting duplicate errors (error + response.failed arrive back-to-back)
+  // Terminal failure events (response.failed, error, response.incomplete,
+  // response.cancelled). Surface as an error chunk with STOP finish reason.
+  // Exactly-once: skip if we already sent a final chunk.
+  if (eventType === "error" || eventType === "response.failed" || eventType === "response.incomplete" || eventType === "response.cancelled") {
     if (state.finishReasonSent) return null;
 
-    const error = data.error || data.response?.error;
-    if (error) {
-      state.error = error;
-      state.finishReasonSent = true;
+    const error = acc.error || data.error || data.response?.error;
+    state.finishReasonSent = true;
+    state.finishReason = OPENAI_FINISH.STOP;
 
-      // Surface the error as an OpenAI-compatible error chunk
-      return buildChunk(
-        { id: state.chatId || `chatcmpl-${Date.now()}`, created: state.created || Math.floor(Date.now() / 1000), model: state.model || MODEL_FALLBACK },
-        { content: `[Error] ${error.message || JSON.stringify(error)}` },
-        OPENAI_FINISH.STOP
-      );
-    }
-    return null;
+    const errorMsg = error?.message || (acc.status === "incomplete" ? "Response incomplete" : acc.status === "cancelled" ? "Response cancelled" : "Response failed");
+
+    return buildChunk(
+      { id: state.chatId || `chatcmpl-${Date.now()}`, created: state.created || Math.floor(Date.now() / 1000), model: state.model || MODEL_FALLBACK },
+      { content: `[Error] ${errorMsg}` },
+      OPENAI_FINISH.STOP
+    );
   }
 
   // Reasoning summary delta → emit as reasoning_content for client thinking display

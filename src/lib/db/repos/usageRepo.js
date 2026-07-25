@@ -2,6 +2,7 @@ import { EventEmitter } from "events";
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 import { getMeta, setMeta } from "../helpers/metaStore.js";
+import { getPricingForModel } from "open-sse/providers/pricing.js";
 
 function maskApiKey(key) {
   if (!key || typeof key !== "string") return null;
@@ -325,12 +326,24 @@ export async function saveRequestUsage(entry) {
         const savedCur = db.get(`SELECT value FROM _meta WHERE key = 'tokensSavedLifetime'`);
         const savedNext = (savedCur ? parseInt(savedCur.value, 10) : 0) + entry.savedTokens;
         db.run(`INSERT INTO _meta(key, value) VALUES('tokensSavedLifetime', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [String(savedNext)]);
+
+        // Dollar savings — convert saved tokens to cost using the model's pricing.
+        // Saved tokens are input-side (prompt compression / cache), so we use the
+        // input rate. Falls back to 0 if no pricing data for this model.
+        const savedPricing = getPricingForModel(entry.provider, entry.model);
+        if (savedPricing?.input) {
+          const costSaved = entry.savedTokens * (savedPricing.input / 1000000);
+          const csCur = db.get(`SELECT value FROM _meta WHERE key = 'costSavedLifetime'`);
+          const csNext = (csCur ? parseFloat(csCur.value) : 0) + costSaved;
+          db.run(`INSERT INTO _meta(key, value) VALUES('costSavedLifetime', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [String(csNext.toFixed(6))]);
+        }
       }
 
       // Per-mechanism lifetime breakdown (RTK, Headroom, Pxpipe, Cache, Caveman, Ponytail).
       // Lets the Overview dashboard attribute savings to each saver. Keys use the
       // `tokensSavedLifetime.<mech>` namespace inside the generic _meta table.
       if (entry.savedTokensByMechanism && typeof entry.savedTokensByMechanism === "object") {
+        const mechPricing = getPricingForModel(entry.provider, entry.model);
         for (const [mech, val] of Object.entries(entry.savedTokensByMechanism)) {
           const n = Number(val);
           if (!Number.isFinite(n) || n <= 0) continue;
@@ -338,6 +351,15 @@ export async function saveRequestUsage(entry) {
           const m = db.get(`SELECT value FROM _meta WHERE key = ?`, [metaKey]);
           const mNext = (m ? parseInt(m.value, 10) : 0) + n;
           db.run(`INSERT INTO _meta(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [metaKey, String(mNext)]);
+
+          // Per-mechanism dollar savings
+          if (mechPricing?.input) {
+            const mechCost = n * (mechPricing.input / 1000000);
+            const csKey = `costSavedLifetime.${mech}`;
+            const csM = db.get(`SELECT value FROM _meta WHERE key = ?`, [csKey]);
+            const csMNext = (csM ? parseFloat(csM.value) : 0) + mechCost;
+            db.run(`INSERT INTO _meta(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [csKey, String(csMNext.toFixed(6))]);
+          }
         }
       }
 
@@ -367,16 +389,24 @@ export async function getUsageHistory(filter = {}) {
 
   if (filter.provider) { conds.push("provider = ?"); params.push(filter.provider); }
   if (filter.model) { conds.push("model = ?"); params.push(filter.model); }
+  // Fix 4.2: support period filter (convert to startDate like getUsageStats does)
+  if (filter.period && !filter.startDate) {
+    const ms = PERIOD_MS[filter.period];
+    if (ms) { filter.startDate = Date.now() - ms; }
+  }
   if (filter.startDate) { conds.push("timestamp >= ?"); params.push(new Date(filter.startDate).toISOString()); }
   if (filter.endDate) { conds.push("timestamp <= ?"); params.push(new Date(filter.endDate).toISOString()); }
 
   const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
-  const rows = db.all(`SELECT timestamp, provider, model, connectionId, apiKey, endpoint, cost, status, tokens FROM usageHistory ${where} ORDER BY id ASC`, params);
+  // Fix 4.1: include latency columns so the leaderboard can compute TTFT/P95
+  const rows = db.all(`SELECT timestamp, provider, model, connectionId, apiKey, endpoint, cost, status, tokens, latencyTtftMs, latencyTotalMs FROM usageHistory ${where} ORDER BY id ASC`, params);
 
   return rows.map((r) => ({
     timestamp: r.timestamp, provider: r.provider, model: r.model,
     connectionId: r.connectionId, apiKeyMasked: maskApiKey(r.apiKey), endpoint: r.endpoint,
     cost: r.cost, status: r.status, tokens: parseJson(r.tokens, {}),
+    latencyTtftMs: r.latencyTtftMs || 0,
+    latencyTotalMs: r.latencyTotalMs || 0,
   }));
 }
 

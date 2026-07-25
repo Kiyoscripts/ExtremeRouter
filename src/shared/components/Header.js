@@ -6,6 +6,7 @@ import PropTypes from "prop-types";
 import HeaderMenu from "@/shared/components/HeaderMenu";
 import HeaderLanguage from "@/shared/components/HeaderLanguage";
 import ThemeToggle from "@/shared/components/ThemeToggle";
+import NotificationBell from "@/shared/components/NotificationBell";
 import { useHeaderSearchStore } from "@/store/headerSearchStore";
 
 const pageMap = [
@@ -95,6 +96,7 @@ export default function Header({ onMenuClick, showMenuButton = true }) {
             </div>
           )}
           <HeaderSearch />
+          <NotificationBell />
           <ThemeToggle />
           <HeaderLanguage />
           <HeaderMenu onLogout={handleLogout} />

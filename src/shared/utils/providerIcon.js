@@ -24,6 +24,7 @@ export const SVG_ICON_IDS = new Set([
   "zenmux-free", "perplexity-agent", "featherless", "moonshot", "qwencloud",
   "devin", "forge", "tokenrouter",
   "qwen-cloud", "qwen-cloud-token-plan", "alibaba", "alibaba-cn", "hcnsec",
+  "cline", "clinepass", "grok-web", "inxorastudio", "inxorastudio-web", "bynara", "infron",
 ]);
 
 /**

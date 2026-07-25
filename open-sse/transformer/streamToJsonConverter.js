@@ -1,20 +1,36 @@
 /**
  * Stream-to-JSON Converter
- * Converts Responses API SSE stream to single JSON response
- * Used when client requests non-streaming but provider forces streaming (e.g., Codex)
+ * Converts Responses API SSE stream to single JSON response.
+ * Used when client requests non-streaming but provider forces streaming (e.g. Codex).
+ *
+ * Uses the shared ResponsesAccumulator (createResponsesAccumulator +
+ * finalizeResponsesAccumulator) for item correlation + terminal output
+ * reconstruction — the same accumulator the streaming translator uses,
+ * ensuring consistent output/usage/error handling between both paths.
  */
 
+import {
+  createResponsesAccumulator,
+  finalizeResponsesAccumulator,
+} from "../translator/concerns/responsesAccumulator.js";
+
+const EMPTY_RESPONSE = { input_tokens: 0, output_tokens: 0, total_tokens: 0 };
+
+function streamFailure(code, message) {
+  return { type: "stream_error", code, message };
+}
+
 /**
- * Process a single SSE message and update state accordingly.
+ * Process a single SSE message through the shared accumulator.
  */
-function processSSEMessage(msg, state) {
+function processSSEMessage(msg, accumulator) {
   if (!msg.trim()) return;
 
   const eventMatch = msg.match(/^event:\s*(.+)$/m);
   const dataMatch = msg.match(/^data:\s*(.+)$/m);
-  if (!eventMatch || !dataMatch) return;
+  if (!dataMatch) return;
 
-  const eventType = eventMatch[1].trim();
+  const eventType = eventMatch?.[1]?.trim();
   const dataStr = dataMatch[1].trim();
   if (dataStr === "[DONE]") return;
 
@@ -22,46 +38,28 @@ function processSSEMessage(msg, state) {
   try { parsed = JSON.parse(dataStr); }
   catch { return; }
 
-  if (eventType === "response.created") {
-    state.responseId = parsed.response?.id || state.responseId;
-    state.created = parsed.response?.created_at || state.created;
-  } else if (eventType === "response.output_item.done") {
-    state.items.set(parsed.output_index ?? 0, parsed.item);
-  } else if (eventType === "response.completed" || eventType === "response.done") {
-    state.status = "completed";
-    if (parsed.response?.usage) {
-      state.usage.input_tokens = parsed.response.usage.input_tokens || 0;
-      state.usage.output_tokens = parsed.response.usage.output_tokens || 0;
-      state.usage.total_tokens = parsed.response.usage.total_tokens || 0;
-    }
-  } else if (eventType === "response.failed") {
-    state.status = "failed";
-  }
+  accumulator.ingest(eventType || parsed.type, parsed);
 }
 
-const EMPTY_RESPONSE = { input_tokens: 0, output_tokens: 0, total_tokens: 0 };
-
 /**
- * Convert Responses API SSE stream to single JSON response
+ * Convert Responses API SSE stream to single JSON response.
  * @param {ReadableStream} stream - SSE stream from provider
  * @returns {Promise<Object>} Final JSON response in Responses API format
  */
 export async function convertResponsesStreamToJson(stream) {
+  const accumulator = createResponsesAccumulator();
+
   if (!stream || typeof stream.getReader !== "function") {
-    return { id: `resp_${Date.now()}`, object: "response", created_at: Math.floor(Date.now() / 1000), status: "failed", output: [], usage: { ...EMPTY_RESPONSE } };
+    const terminal = finalizeResponsesAccumulator(accumulator, {
+      error: streamFailure("invalid_stream", "response stream is unavailable"),
+    });
+    return { ...terminal.response, usage: { ...EMPTY_RESPONSE } };
   }
 
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-
-  const state = {
-    responseId: "",
-    created: Math.floor(Date.now() / 1000),
-    status: "in_progress",
-    usage: { ...EMPTY_RESPONSE },
-    items: new Map()
-  };
+  let readError = null;
 
   try {
     while (true) {
@@ -73,31 +71,38 @@ export async function convertResponsesStreamToJson(stream) {
       buffer = messages.pop() || "";
 
       for (const msg of messages) {
-        processSSEMessage(msg, state);
+        processSSEMessage(msg, accumulator);
       }
     }
 
     // Flush remaining buffer (last event may not end with \n\n)
     if (buffer.trim()) {
-      processSSEMessage(buffer, state);
+      processSSEMessage(buffer, accumulator);
     }
+  } catch (error) {
+    readError = error;
   } finally {
     reader.releaseLock();
   }
 
-  // Build output array from accumulated items (ordered by index)
-  const output = [];
-  const maxIndex = state.items.size > 0 ? Math.max(...state.items.keys()) : -1;
-  for (let i = 0; i <= maxIndex; i++) {
-    output.push(state.items.get(i) || { type: "message", content: [], role: "assistant" });
+  // Finalize: if the stream threw or closed without a terminal event, mark
+  // the accumulator as failed with the appropriate error. This preserves
+  // partial output + exactly-once failure semantics.
+  if (readError || !accumulator.status) {
+    finalizeResponsesAccumulator(accumulator, {
+      error: readError
+        ? streamFailure("stream_read_error", readError.message || "stream read failed")
+        : streamFailure("stream_disconnected", "stream closed before response.completed"),
+      status: "failed",
+    });
   }
 
-  return {
-    id: state.responseId || `resp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-    object: "response",
-    created_at: state.created,
-    status: state.status || "completed",
-    output,
-    usage: state.usage
-  };
+  const { response } = finalizeResponsesAccumulator(accumulator);
+
+  // Usage: from response.completed if captured, else zeros.
+  const usage = accumulator.usage
+    ? { input_tokens: accumulator.usage.input_tokens, output_tokens: accumulator.usage.output_tokens, total_tokens: accumulator.usage.total_tokens }
+    : { ...EMPTY_RESPONSE };
+
+  return { ...response, usage };
 }

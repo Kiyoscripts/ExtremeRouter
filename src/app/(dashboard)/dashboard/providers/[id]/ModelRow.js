@@ -19,6 +19,12 @@ export default function ModelRow({ model, fullModel, alias, copied, onCopy, test
     : undefined;
 
   // Whether this model supports reasoning — gating the thinking picker.
+  // Note: server-side getThinkingLevels() (thinkingLevels.js) is the
+  // authoritative gate for which levels are valid; the picker here is a
+  // client-side convenience. The request translator normalizes any invalid
+  // suffix via resolveKiroModelIntent + applyKiroThinkingOverride, so even if
+  // a user manually copies a "(level)" suffix for an unsupported model, the
+  // upstream request stays clean.
   const supportsThinking = !!caps?.reasoning;
 
   // The text that gets copied to clipboard. When a thinking level is selected

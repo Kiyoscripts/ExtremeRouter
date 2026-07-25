@@ -634,6 +634,37 @@ export async function POST(request) {
           break;
         }
 
+        case "inxorastudio-web": {
+          // Bearer JWT from labs.inxorastudio.com dashboard. Validate via
+          // /api/auth/me which returns user data for valid tokens.
+          let token = apiKey.replace(/^Bearer\s+/i, "").replace(/^cookie:\s*/i, "").trim();
+          try {
+            const res = await fetch("https://labs.inxorastudio.com/api/auth/me", {
+              method: "GET",
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
+                Referer: "https://labs.inxorastudio.com/dashboard",
+              },
+            });
+            if (res.status === 401 || res.status === 403) {
+              isValid = false;
+              error = "Invalid or expired InxoraStudio JWT — re-copy from labs.inxorastudio.com DevTools (Authorization header).";
+            } else if (!res.ok) {
+              isValid = false;
+              error = `InxoraStudio returned ${res.status}`;
+            } else {
+              const data = await res.json().catch(() => null);
+              isValid = !!(data?.user?.id);
+              if (!isValid) error = "Session accepted but no user data — token may be expired";
+            }
+          } catch (err) {
+            isValid = false;
+            error = err.message || "Failed to validate InxoraStudio token";
+          }
+          break;
+        }
+
         case "deepseek-web": {
           // userToken from DeepSeek localStorage (JSON-wrapped {"value":"..."} or bare).
           let userToken = apiKey;

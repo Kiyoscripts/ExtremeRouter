@@ -15,7 +15,6 @@ import { OpenCodeGoExecutor } from "./opencode-go.js";
 import { GrokWebExecutor } from "./grok-web.js";
 import { PerplexityWebExecutor } from "./perplexity-web.js";
 import { OllamaLocalExecutor } from "./ollama-local.js";
-import { CommandCodeExecutor } from "./commandcode.js";
 import { XiaomiTokenplanExecutor } from "./xiaomi-tokenplan.js";
 import { MimoFreeExecutor } from "./mimo-free.js";
 import { CodeBuddyExecutor } from "./codebuddy-cn.js";
@@ -30,6 +29,7 @@ import { BlackboxWebExecutor } from "./blackbox-web.js";
 import { ZenmuxFreeExecutor } from "./zenmux-free.js";
 import { ApiAirforceExecutor } from "./api-airforce.js";
 import { FreeBuffWebExecutor } from "./freebuff-web.js";
+import { InxorastudioWebExecutor } from "./inxorastudio-web.js";
 import { PerplexityAgentExecutor } from "./perplexity-agent.js";
 import { QwenCloudExecutor } from "./qwencloud.js";
 import { T3ChatWebExecutor } from "./t3-web.js";
@@ -73,7 +73,7 @@ const executors = {
   "grok-web": new GrokWebExecutor(),
   "perplexity-web": new PerplexityWebExecutor(),
   "ollama-local": new OllamaLocalExecutor(),
-  commandcode: new CommandCodeExecutor(),
+  // commandcode now uses DefaultExecutor (OpenAI/Anthropic native endpoints)
   "xiaomi-tokenplan": new XiaomiTokenplanExecutor(),
   "mimo-free": new MimoFreeExecutor(),
   mmf: new MimoFreeExecutor(), // Alias for mimo-free
@@ -103,6 +103,7 @@ const executors = {
   "zenmux-free": new ZenmuxFreeExecutor(),
   "api-airforce": new ApiAirforceExecutor(),
   "freebuff-web": new FreeBuffWebExecutor(),
+  "inxorastudio-web": new InxorastudioWebExecutor(),
   "perplexity-agent": new PerplexityAgentExecutor(),
   "qwencloud": new QwenCloudExecutor(),
   lmarena: new LMArenaExecutor(),
@@ -142,7 +143,7 @@ export { OpenCodeGoExecutor } from "./opencode-go.js";
 export { GrokWebExecutor } from "./grok-web.js";
 export { PerplexityWebExecutor } from "./perplexity-web.js";
 export { OllamaLocalExecutor } from "./ollama-local.js";
-export { CommandCodeExecutor } from "./commandcode.js";
+// CommandCodeExecutor removed — provider now uses standard OpenAI/Anthropic endpoints (DefaultExecutor)
 export { XiaomiTokenplanExecutor } from "./xiaomi-tokenplan.js";
 export { MimoFreeExecutor } from "./mimo-free.js";
 export { CodeBuddyExecutor } from "./codebuddy-cn.js";
@@ -171,6 +172,7 @@ export { HuggingChatExecutor } from "./huggingchat.js";
 export { ZenmuxFreeExecutor } from "./zenmux-free.js";
 export { ApiAirforceExecutor } from "./api-airforce.js";
 export { FreeBuffWebExecutor } from "./freebuff-web.js";
+export { InxorastudioWebExecutor } from "./inxorastudio-web.js";
 export { PerplexityAgentExecutor } from "./perplexity-agent.js";
 export { QwenCloudExecutor } from "./qwencloud.js";
 export { LMArenaExecutor } from "./lmarena.js";

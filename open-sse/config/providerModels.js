@@ -48,7 +48,24 @@ export function getModelType(aliasOrId, modelId) {
 export function getModelUpstreamId(aliasOrId, modelId) {
   const models = PROVIDER_MODELS[aliasOrId];
   const found = models?.find(m => m.id === modelId);
-  if (found?.upstreamModelId) return found.upstreamModelId;
+  if (found?.upstreamModelId) {
+    // Tier-preset suffix support: a model entry can carry a preset tag in its
+    // upstreamModelId, e.g. "gemini-3.6-flash-tiered(high)" for tiered routing.
+    // When the caller appended an effort/tier suffix (e.g. "-high"), we merge
+    // the caller's suffix with the preset; otherwise the preset wins on its own.
+    // Port of decolua/9router commit 190020c (isolates tiered model routing).
+    const resolvedId = found.upstreamModelId;
+    const presetMatch = resolvedId.match(/\([^()]+\)\s*$/);
+    const presetSuffix = presetMatch?.[0] || "";
+    if (presetSuffix) {
+      const resolvedBase = resolvedId.slice(0, presetMatch.index).trim();
+      // Caller suffix (passed as modelId tail) takes precedence if present.
+      const callerSuffixMatch = typeof modelId === "string" ? modelId.match(/-(high|medium|low)$/i) : null;
+      const callerTier = callerSuffixMatch?.[0] ? `(${callerSuffixMatch[0].slice(1).toLowerCase()})` : "";
+      return resolvedBase + (callerTier || presetSuffix);
+    }
+    return resolvedId;
+  }
   if (aliasOrId === "cx" && typeof modelId === "string" && modelId.endsWith(CODEX_REVIEW_SUFFIX)) {
     return modelId.slice(0, -CODEX_REVIEW_SUFFIX.length);
   }

@@ -132,11 +132,27 @@ export const ANTIGRAVITY_HEADERS = {
   "User-Agent": `antigravity/2.1.1 ${platform()}/${arch()}`
 };
 
-// Cloud Code Assist API
+// Cloud Code Assist API endpoints differ by client ecosystem.
+// gemini-cli uses the production host (cloudcode-pa.googleapis.com) while
+// antigravity uses the sandbox host (daily-cloudcode-pa.googleapis.com) per
+// decolua/9router commit 190020c. Keyed by provider id; projectId.js resolves
+// the right endpoints per-connection.
 export const CLOUD_CODE_API = {
-  loadCodeAssist: "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist",
-  onboardUser: "https://cloudcode-pa.googleapis.com/v1internal:onboardUser",
+  "gemini-cli": {
+    loadCodeAssist: "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist",
+    onboardUser: "https://cloudcode-pa.googleapis.com/v1internal:onboardUser",
+  },
+  antigravity: {
+    loadCodeAssist: "https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist",
+    onboardUser: "https://daily-cloudcode-pa.googleapis.com/v1internal:onboardUser",
+  },
 };
+
+// Back-compat flat accessor: callers that haven't been migrated to pass a
+// provider default to the gemini-cli (production) endpoints — the previous
+// behavior before this map was split.
+export const CLOUD_CODE_LOAD_CODEASSIST = CLOUD_CODE_API["gemini-cli"].loadCodeAssist;
+export const CLOUD_CODE_ONBOARD_USER = CLOUD_CODE_API["gemini-cli"].onboardUser;
 
 export const LOAD_CODE_ASSIST_HEADERS = {
   "Content-Type": "application/json",

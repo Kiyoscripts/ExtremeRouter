@@ -1,3 +1,49 @@
+# v0.7.6 (2026-07-25)
+
+## Features
+- **Dollar Savings Tracker**: hero card di Overview menampilkan total $ Saved (lifetime) dengan per-mechanism breakdown (RTK/Headroom/Pxpipe/Cache/Caveman/Ponytail) + "With vs Without ExtremeRouter" comparison.
+- **Provider Performance Leaderboard**: sortable table di Overview dengan ranking per-provider: Requests, Tokens, TTFT, P95 Latency, Success Rate, Cost. Period selector (24h/7d/30d). Custom provider names resolved dari providerNodes.
+- **SSE Live Dashboard**: unified `/api/dashboard/stream` SSE endpoint (stats + breaker + health). Real-time KPI updates via `useDashboardStream` hook dengan auto-reconnect.
+- **In-App Notification System**: bell icon di header dengan unread badge, dropdown feed, localStorage history persistence. Push notifications untuk provider down/recovered/health degraded/rate limited.
+- **Cross-Transport Fallback**: OpenAI endpoint timeout/5xx → auto-retry Anthropic endpoint (body re-translated). Fresh AbortController per attempt. Applied ke GLM, hcnsec, Bynara, InxoraStudio, CommandCode, Infron, AgentRouter.
+- **New Provider: Bynara**: multi-model router (OpenAI + Anthropic + Responses + Image gen/edits).
+- **New Provider: InxoraStudio Labs (API)**: OpenAI + Anthropic multi-endpoint.
+- **New Provider: InxoraStudio Labs (Web)**: JWT web chat executor (3-step flow), profile badge, auto model discovery.
+- **New Provider: Infron AI**: 457+ models, OpenAI + Anthropic, quota tracker (credit balance).
+- **New Provider: AgentRouter**: GLM/GPT/Claude, OpenAI + Anthropic, custom pricing model discovery.
+- **Updated Provider: Command Code**: migrated dari custom `/alpha/generate` ke standard OpenAI/Anthropic provider API, live model discovery (47 models).
+- **Quota Tracker: Grok Web (Subscription)**: SSO cookie rate-limits (Fast/Thinking/Heavy tiers).
+- **Quota Tracker: Infron AI**: credit balance via `/v1/balance`.
+
+## Fixes
+- **Kiro `REQUEST_BODY_INVALID`**: normalize `(level)` suffix sebelum resolving synthetic variants. Map explicit levels ke native Kiro effort fields hanya untuk supported families (Claude 5 / GPT-5.6). `thinkingLevels.js` server-side gating.
+- **Responses API accumulator**: shared `ResponsesAccumulator` untuk streaming + forced non-stream. Alias-safe tool reconstruction. `preferComplete` untuk snapshot merge. Exactly-once terminal semantics.
+- **Responses `incomplete`/`cancelled`**: terminal events sekarang di-recognize di `responsesStreamHelpers.js`.
+- **Antigravity "model turn" 400**: strip trailing `role:"model"` turns dari `contents[]` sebelum kirim ke Google Cloud Code.
+- **Antigravity tier routing**: `gemini-3.6-flash-high/medium/low` dengan `upstreamModelId: "gemini-3.6-flash-tiered(high)"` + parser di `getModelUpstreamId`.
+- **Cloud Code endpoint isolation**: gemini-cli→`cloudcode-pa`, antigravity→`daily-cloudcode-pa` via per-provider `CLOUD_CODE_API` map.
+- **Circuit breaker `releaseBreakerProbe`**: `monitors`→`breakers` ReferenceError fix.
+- **Combo `comboStickyLimit`**: wrong key `comboStickyLimit`→`comboStickyRoundRobinLimit`.
+- **Combo `comboStrategies` lost-update**: deep-merge per combo-name + null delete-signal.
+- **Cross-transport abort**: fresh AbortController untuk alternate attempt.
+- **Cross-transport error logging**: alternate failure error tidak lagi di-swallow silently.
+- **Responses output getter**: dedup alias-registered tools + iterate string-keyed items.
+- **Notification spam**: `health_update` dan `usage_update` tidak lagi jadi notification.
+- **Notification raw JSON**: `formatEventMessage` return `null` untuk unknown types.
+- **Notification duplicate**: `lastProcessedTs` useRef guard + dedup.
+- **NotificationBell setState-during-render**: `markAllRead` deferred via `requestAnimationFrame`.
+- **NotificationBell key collision**: `idCounter` seeded dari `Date.now()` + max history id.
+- **hcnsec model discovery**: tambah `"openai"` filter + authenticated suggested-models proxy.
+- **WEB_COOKIE_PROVIDERS modelsFetcher**: page.js sekarang include webCookie providers di model discovery chain.
+- **InxoraStudio profile badge**: `InxoraProfile` component + wiring di ConnectionsCard.
+
+## Improvements
+- **Dead code cleanup**: hapus 12 dead files (1,705 LOC) + dead `convertResponsesApiFormat` function.
+- **Junk dependency removed**: `fs` (0.0.1-security placeholder package) dari dependencies.
+- **Command Code executor**: hapus custom `CommandCodeExecutor`, pakai `DefaultExecutor` (OpenAI/Anthropic native).
+- **Model discovery**: `suggested-models` route sekarang support `connectionId` untuk authenticated discovery.
+- **Validate route**: hcnsec, InxoraStudio-web, inxorastudio (API) validate cases.
+
 # v0.7.5 (2026-07-22)
 
 ## Features

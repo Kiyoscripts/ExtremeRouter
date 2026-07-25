@@ -22,6 +22,8 @@ import {
 import { getXaiUsage } from "./usage/xai.js";
 import { getTokenRouterUsage } from "./usage/tokenrouter.js";
 import { getClineUsage } from "./usage/cline.js";
+import { getGrokWebUsage } from "./usage/grok-web.js";
+import { getInfronUsage } from "./usage/infron.js";
 
 /**
  * Get usage data for a provider connection
@@ -52,6 +54,8 @@ const USAGE_HANDLERS = {
   // a single handler serves both providers.
   cline: (c) => getClineUsage({ accessToken: c.accessToken, apiKey: c.apiKey }, c.proxyOptions),
   clinepass: (c) => getClineUsage({ accessToken: c.accessToken, apiKey: c.apiKey }, c.proxyOptions),
+  "grok-web": (c) => getGrokWebUsage({ apiKey: c.apiKey }, c.proxyOptions),
+  infron: (c) => getInfronUsage({ apiKey: c.apiKey }, c.proxyOptions),
 };
 
 export async function getUsageForProvider(connection, proxyOptions = null) {

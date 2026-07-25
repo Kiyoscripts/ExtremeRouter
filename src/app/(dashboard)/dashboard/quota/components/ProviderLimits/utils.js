@@ -521,6 +521,45 @@ export function parseQuotaData(provider, data) {
         }
         break;
       }
+      case "infron": {
+        // Infron AI — prepaid credit balance from /v1/balance.
+        // Single wallet row; total = current balance, no cap.
+        if (data.quotas) {
+          Object.entries(data.quotas).forEach(([name, quota]) => {
+            normalizedQuotas.push({
+              name,
+              used: quota.used || 0,
+              total: quota.total || 0,
+              remaining: quota.remaining,
+              remainingPercentage: quota.remainingPercentage,
+              resetAt: quota.resetAt || null,
+              recurring: false,
+              unlimited: false,
+            });
+          });
+        }
+        break;
+      }
+      case "grok-web": {
+        // Grok Web (Subscription) — per-tier rate-limits (Fast/Thinking/Heavy)
+        // from grok.com/rest/rate-limits. Each quota row shows
+        // remaining/total queries in the rolling 2-hour window.
+        if (data.quotas) {
+          Object.entries(data.quotas).forEach(([name, quota]) => {
+            normalizedQuotas.push({
+              name,
+              used: quota.used || 0,
+              total: quota.total || 0,
+              remaining: quota.remaining,
+              remainingPercentage: quota.remainingPercentage,
+              resetAt: quota.resetAt || null,
+              recurring: true,
+              unlimited: false,
+            });
+          });
+        }
+        break;
+      }
       default:
         // Generic fallback for unknown providers
         if (data.quotas) {

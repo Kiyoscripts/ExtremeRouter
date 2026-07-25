@@ -20,6 +20,12 @@ export default {
     baseUrl: "https://grok.com/rest/app-chat/conversations/new",
     format: "grok-web",
     authType: "cookie",
+    // Quota Tracker — grok.com web rate-limits endpoint. Returns
+    // remainingQueries / totalQueries / windowSizeSeconds per model tier.
+    // Authenticated via the SSO cookie (same credential used for chat).
+    usage: {
+      rateLimitsUrl: "https://grok.com/rest/rate-limits",
+    },
   },
   models: [
     { id: "grok-3", name: "Grok 3" },
@@ -36,4 +42,7 @@ export default {
     { id: "grok-4.2", name: "Grok 4.2 (4.20 Beta)" },
   ],
   passthroughModels: true,
+  features: {
+    usage: true,
+  },
 };

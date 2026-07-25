@@ -11,6 +11,7 @@ import VaultPoolBadge from "../VaultPoolBadge";
 import FreeBuffProfile from "../FreeBuffProfile";
 import V0Profile from "../V0Profile";
 import QwenCloudProfile from "../QwenCloudProfile";
+import InxoraProfile from "../InxoraProfile";
 import ZenmuxPlanSelector from "../ZenmuxPlanSelector";
 import NoAuthProxyCard from "@/shared/components/NoAuthProxyCard";
 
@@ -115,6 +116,9 @@ export default function ConnectionsCard({
           )}
           {providerId === "qwencloud" && connections.length > 0 && (
             <QwenCloudProfile connectionId={connections[0].id} />
+          )}
+          {providerId === "inxorastudio-web" && connections.length > 0 && (
+            <InxoraProfile connectionId={connections[0].id} />
           )}
         </div>
 

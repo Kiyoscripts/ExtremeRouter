@@ -146,6 +146,18 @@ export function resolveTransport(provider, sourceFormat) {
   return transports.find(t => t.format === sourceFormat) || null;
 }
 
+// Resolve the ALTERNATE transport (the one NOT matching currentFormat).
+// Used for cross-transport fallback: when the primary endpoint (e.g. OpenAI)
+// times out or 5xxs, the engine retries via the alternate endpoint (e.g.
+// Claude) — re-translating the body to the alternate format first.
+// Returns null for single-endpoint providers (no fallback possible).
+export function resolveAlternateTransport(provider, currentFormat) {
+  const config = PROVIDERS[provider];
+  const transports = config?.transports;
+  if (!Array.isArray(transports) || transports.length < 2) return null;
+  return transports.find(t => t.format !== currentFormat) || null;
+}
+
 // Check if last message is from user
 export function isLastMessageFromUser(body) {
   const messages = body.messages || body.contents;

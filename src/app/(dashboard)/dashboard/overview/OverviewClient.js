@@ -3,6 +3,8 @@
 import { useState, useEffect } from "react";
 import { Card, PageHeader, CardSkeleton } from "@/shared/components";
 import OverviewKpiCards from "./components/OverviewKpiCards";
+import SavingsCard from "./components/SavingsCard";
+import LeaderboardTable from "./components/LeaderboardTable";
 import TokenSaverStatus from "./components/TokenSaverStatus";
 import FreeProvidersGrid from "./components/FreeProvidersGrid";
 
@@ -39,6 +41,9 @@ export default function OverviewClient() {
       {/* Hero KPI cards */}
       <OverviewKpiCards data={data} />
 
+      {/* Dollar Savings */}
+      <SavingsCard data={data} />
+
       {/* Token Saver status */}
       <Card
         title="Token Savers"
@@ -58,6 +63,9 @@ export default function OverviewClient() {
       >
         <FreeProvidersGrid providers={data?.freeProviders || []} />
       </Card>
+
+      {/* Provider Performance Leaderboard */}
+      <LeaderboardTable />
     </div>
   );
 }

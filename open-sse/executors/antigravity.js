@@ -195,6 +195,17 @@ export class AntigravityExecutor extends BaseExecutor {
       return c;
     });
 
+    // Google Cloud Code rejects requests where the last content turn is from
+    // the model ("Requests ending with a model turn are not supported"). This
+    // happens when the client sends a conversation history that ends with an
+    // assistant message (e.g. Claude Code sending the previous response as
+    // context). Strip trailing model turns so the last entry is always user.
+    if (Array.isArray(contents) && contents.length > 0) {
+      while (contents.length > 1 && contents[contents.length - 1]?.role === "model") {
+        contents.pop();
+      }
+    }
+
     // Sanitize tool schemas and function names before sending to Antigravity.
     let tools = body.request?.tools;
 
