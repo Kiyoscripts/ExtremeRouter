@@ -33,10 +33,9 @@ export default {
   transports: [
     {
       format: "openai",
-      // Platform general endpoint (works with all API keys). The /coding/paas/
-      // path was GLM Coding Plan specific and 503'd for general API keys.
-      // Per https://docs.z.ai/api-reference/introduction: general = /api/paas/v4
-      baseUrl: "https://api.z.ai/api/paas/v4/chat/completions",
+      // GLM Coding Plan dedicated endpoint. Requires a Coding Plan API key
+      // (created at open.bigmodel.cn/usercenter/apikeys).
+      baseUrl: "https://api.z.ai/api/coding/paas/v4/chat/completions",
       auth: { combined: true, header: "Authorization", scheme: "bearer" },
     },
     {

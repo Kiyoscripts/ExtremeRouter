@@ -485,11 +485,27 @@ export function openaiResponsesToOpenAIResponse(chunk, state) {
   }
 
   // Function call done (standard or custom_tool_call variant).
-  // Mark emitted for exactly-once semantics — if the done event carries
-  // complete arguments we don't need to re-emit (the deltas already streamed).
+  // Mark emitted for exactly-once semantics. Some providers ONLY send
+  // output_item.done (no deltas) — in that case the accumulator has the
+  // full arguments from the done event but they were never streamed.
+  // Emit a final arguments delta so the client receives the payload.
   if (eventType === "response.output_item.done" && (data.item?.type === RESPONSES_ITEM.FUNCTION_CALL || data.item?.type === "custom_tool_call")) {
     const itemId = data.item?.id || data.item?.call_id || "";
     if (itemId) acc.markToolCallEmitted(itemId);
+
+    // Check if this tool's arguments were never streamed via deltas.
+    // The accumulator's argsBuffer was populated by _ingestFullItem or by
+    // output_item.done's snapshot. If we haven't emitted arguments yet,
+    // emit them now.
+    const tool = acc.getTool(data.output_index ?? itemId);
+    if (tool && tool.argsBuffer && !acc.isToolCallEmitted(`args_${itemId}`)) {
+      acc.markToolCallEmitted(`args_${itemId}`);
+      const tcIndex = acc.toolCallIndexFor(data.output_index ?? itemId);
+      return buildChunk(
+        { id: state.chatId, created: state.created, model: state.model || MODEL_FALLBACK },
+        { tool_calls: [{ index: tcIndex, function: { arguments: tool.argsBuffer } }] }
+      );
+    }
     return null;
   }
 
@@ -521,23 +537,58 @@ export function openaiResponsesToOpenAIResponse(chunk, state) {
     return null;
   }
 
-  // Terminal failure events (response.failed, error, response.incomplete,
-  // response.cancelled). Surface as an error chunk with STOP finish reason.
+  // Terminal failure events (response.failed, error, response.cancelled).
+  // Surface as an error chunk with STOP finish reason.
   // Exactly-once: skip if we already sent a final chunk.
-  if (eventType === "error" || eventType === "response.failed" || eventType === "response.incomplete" || eventType === "response.cancelled") {
+  //
+  // Note: response.incomplete is handled separately below — it is NOT an error.
+  // A truncated-but-successful response should emit LENGTH finish reason (not
+  // inject error text into the content).
+  if (eventType === "error" || eventType === "response.failed" || eventType === "response.cancelled") {
     if (state.finishReasonSent) return null;
 
     const error = acc.error || data.error || data.response?.error;
     state.finishReasonSent = true;
     state.finishReason = OPENAI_FINISH.STOP;
 
-    const errorMsg = error?.message || (acc.status === "incomplete" ? "Response incomplete" : acc.status === "cancelled" ? "Response cancelled" : "Response failed");
+    const errorMsg = error?.message || (acc.status === "cancelled" ? "Response cancelled" : "Response failed");
 
     return buildChunk(
       { id: state.chatId || `chatcmpl-${Date.now()}`, created: state.created || Math.floor(Date.now() / 1000), model: state.model || MODEL_FALLBACK },
       { content: `[Error] ${errorMsg}` },
       OPENAI_FINISH.STOP
     );
+  }
+
+  // response.incomplete — truncated but valid response (e.g. max_output_tokens
+  // hit). Emit a normal finish chunk with LENGTH reason (not error text).
+  // Usage is captured if available.
+  if (eventType === "response.incomplete") {
+    if (state.finishReasonSent) return null;
+
+    const finishReason = acc.incompleteDetails?.reason === "max_output_tokens"
+      ? OPENAI_FINISH.LENGTH
+      : OPENAI_FINISH.STOP;
+
+    state.finishReasonSent = true;
+    state.finishReason = finishReason;
+
+    const finalChunk = buildChunk(
+      { id: state.chatId, created: state.created, model: state.model || MODEL_FALLBACK },
+      {},
+      finishReason
+    );
+
+    if (acc.usage) {
+      finalChunk.usage = buildUsage({
+        promptTokens: acc.usage.input_tokens,
+        completionTokens: acc.usage.output_tokens,
+        totalTokens: acc.usage.total_tokens,
+        cachedTokens: acc.usage.cached_tokens,
+      });
+    }
+
+    return finalChunk;
   }
 
   // Reasoning summary delta → emit as reasoning_content for client thinking display

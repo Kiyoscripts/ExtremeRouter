@@ -23,6 +23,11 @@ import { DEFAULT_RETRY_CONFIG, FETCH_CONNECT_TIMEOUT_MS } from "../config/runtim
  * @property {Object}  [features]     Feature flags, e.g. {usage:true}.
  * @property {Object}  [thinkingConfig] Reasoning UI: {options:[...],defaultMode}.
  * @property {boolean} [passthroughModels] Forward client model id untouched.
+ * @property {Object}  [capabilities] Per-provider capability flags (drives combo role gating).
+ *   @property {boolean} [capabilities.toolUse]     Supports function/tool calling. Default: true for API providers, false for webCookie.
+ *   @property {boolean} [capabilities.fileAccess]  Can read files via tools/API. Default: true for API providers, false for webCookie.
+ *   @property {boolean} [capabilities.streaming]   Supports streaming responses. Default: true.
+ *   @property {boolean} [capabilities.multiTurn]   Supports conversation history. Default: true.
  *
  * TransportConfig: { baseUrl, format, headers, auth, forceStream, urlSuffix, quirks, retry, timeoutMs,
  *   executor, clientId, clientSecret, tokenUrl, refreshUrl, usage, cliVersion, apiClient, regions,

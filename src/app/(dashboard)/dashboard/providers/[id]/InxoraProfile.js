@@ -15,13 +15,17 @@ export default function InxoraProfile({ connectionId }) {
     (async () => {
       try {
         const res = await fetch(`/api/providers/${connectionId}/inxora-profile`, { cache: "no-store" });
-        if (!res.ok) return;
-        const data = await res.json();
-        if (!cancelled) setProfile(data);
+        if (res.ok) {
+          const data = await res.json();
+          if (!cancelled) setProfile(data);
+        }
       } catch {
         // non-fatal
+      } finally {
+        // Fix #14: always finish loading — previously `return` on !res.ok
+        // bypassed setLoading(false), leaving skeleton visible forever.
+        if (!cancelled) setLoading(false);
       }
-      if (!cancelled) setLoading(false);
     })();
     return () => { cancelled = true; };
   }, [connectionId]);

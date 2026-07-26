@@ -47,12 +47,14 @@ export default function LeaderboardTable() {
   const [sortDir, setSortDir] = useState("desc");
 
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
     fetch(`/api/usage/leaderboard?period=${period}`)
       .then((r) => r.json())
-      .then((d) => { if (!d.error) setData(d.leaderboard || []); })
+      .then((d) => { if (!cancelled && !d.error) setData(d.leaderboard || []); })
       .catch(() => {})
-      .finally(() => setLoading(false));
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [period]);
 
   const sorted = useMemo(() => {

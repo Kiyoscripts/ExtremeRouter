@@ -12,7 +12,10 @@ import FreeBuffProfile from "../FreeBuffProfile";
 import V0Profile from "../V0Profile";
 import QwenCloudProfile from "../QwenCloudProfile";
 import InxoraProfile from "../InxoraProfile";
+import OneMinProfile from "../OneMinProfile";
+import OneMinApiProfile from "../OneMinApiProfile";
 import ZenmuxPlanSelector from "../ZenmuxPlanSelector";
+import MarathonWindowSelector from "../MarathonWindowSelector";
 import NoAuthProxyCard from "@/shared/components/NoAuthProxyCard";
 
 /**
@@ -120,6 +123,12 @@ export default function ConnectionsCard({
           {providerId === "inxorastudio-web" && connections.length > 0 && (
             <InxoraProfile connectionId={connections[0].id} />
           )}
+          {providerId === "1min" && connections.length > 0 && (
+            <OneMinProfile connectionId={connections[0].id} />
+          )}
+          {providerId === "1min-api" && connections.length > 0 && (
+            <OneMinApiProfile connectionId={connections[0].id} />
+          )}
         </div>
 
         {/* Toolbar: wraps on mobile, row on desktop */}
@@ -194,6 +203,13 @@ export default function ConnectionsCard({
               cookie={connections[0].apiKey || ""}
               currentPlan={connections[0].providerSpecificData?.zenmuxPlan || "free"}
               onPlanChanged={fetchConnections}
+            />
+          )}
+          {providerId === "marathon" && connections.length > 0 && (
+            <MarathonWindowSelector
+              connectionId={connections[0].id}
+              currentWindow={connections[0].providerSpecificData?.completionWindow || "now"}
+              onWindowChanged={fetchConnections}
             />
           )}
         </div>

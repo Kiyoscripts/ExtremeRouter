@@ -40,7 +40,7 @@ export default {
       scheme: "bearer",
     },
   },
-  // Multi-endpoint: OpenAI (/v1) + Anthropic (root — SDK appends /v1/messages).
+  // Multi-endpoint: OpenAI (/v1/chat/completions) + Anthropic (/v1/messages).
   transports: [
     {
       format: "openai",

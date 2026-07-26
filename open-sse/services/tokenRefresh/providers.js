@@ -622,3 +622,62 @@ export async function refreshCodebuddyToken(refreshToken, log) {
     };
   }, log);
 }
+
+/**
+ * Zed Hosted AI — mint a new short-lived LLM bearer token.
+ *
+ * Zed's auth model is two-layered: the long-lived user credentials (userId +
+ * zedAccessToken, the latter stored as `refreshToken` on the connection) are
+ * exchanged for a 1h LLM token via POST /client/llm_tokens. The executor also
+ * refreshes inline on 401, but this handler enables proactive/health refresh.
+ *
+ * @param {string} refreshToken - the Zed user access token (zedAccessToken)
+ * @param {object} providerSpecificData - must contain userId (+ optional organizationId)
+ */
+export async function refreshZedLlmToken(refreshToken, providerSpecificData, log) {
+  if (!refreshToken) return null;
+  const userId = providerSpecificData?.userId;
+  if (!userId) {
+    log?.warn?.("TOKEN_REFRESH", "Zed refresh missing userId in providerSpecificData");
+    return null;
+  }
+  const organizationId = providerSpecificData?.organizationId || null;
+  return dedupRefresh("zed", refreshToken, async () => {
+    const base = (PROVIDERS.zed?.baseUrl || "https://cloud.zed.dev").replace(/\/$/, "");
+    const path = PROVIDER_OAUTH.zed?.llmTokensPath || "/client/llm_tokens";
+    const body = organizationId ? { organization_id: organizationId } : {};
+    const response = await proxyAwareFetch(`${base}${path}`, {
+      method: "POST",
+      headers: {
+        Authorization: `${userId} ${refreshToken}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      log?.error?.("TOKEN_REFRESH", `Zed LLM token refresh failed (${response.status}): ${text.slice(0, 200)}`);
+      return null;
+    }
+    const data = await response.json().catch(() => null);
+    const raw = data?.token;
+    // Token may be a plain string or a CBOR-ish object { "0": "..." }.
+    const token =
+      typeof raw === "string"
+        ? raw
+        : raw && typeof raw === "object"
+          ? raw["0"] || raw.token || Object.values(raw)[0]
+          : null;
+    if (!token) {
+      log?.error?.("TOKEN_REFRESH", "Zed LLM token response missing token");
+      return null;
+    }
+    log?.info?.("TOKEN_REFRESH", "Successfully minted new Zed LLM token");
+    return {
+      accessToken: token,
+      expiresIn: 3600,
+      providerSpecificData: { llmToken: token, lastLlmTokenAt: new Date().toISOString() },
+    };
+  }, log);
+}

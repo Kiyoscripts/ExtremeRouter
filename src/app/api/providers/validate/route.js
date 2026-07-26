@@ -394,6 +394,31 @@ export async function POST(request) {
           break;
         }
 
+        case "marathon": {
+          // Marathon (by GoKite AI) — adaptive inference infrastructure.
+          // Validate via a minimal chat probe to the verified endpoint
+          // (/v1/delayed/chat/completions). Uses completion_window:"now" for
+          // an immediate synchronous response so validation is fast.
+          const testModel = getDefaultModel("marathon") || "kimi-k3";
+          const res = await fetch("https://delayed-inference.prod.gokite.ai/v1/delayed/chat/completions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
+            body: JSON.stringify({
+              model: testModel,
+              messages: [{ role: "user", content: "ping" }],
+              max_tokens: 1,
+              stream: false,
+              completion_window: "now",
+            }),
+            signal: AbortSignal.timeout(15000),
+          });
+          // 200 = valid key + served synchronously. 202 = valid key, delayed job
+          // accepted (still means the key is good). 401/403 = invalid key.
+          isValid = res.status !== 401 && res.status !== 403;
+          if (!isValid) error = "Marathon API key rejected — check your key at marathon.build";
+          break;
+        }
+
         case "opencode-go": {
           const res = await fetch("https://opencode.ai/zen/go/v1/chat/completions", {
             method: "POST",
@@ -661,6 +686,77 @@ export async function POST(request) {
           } catch (err) {
             isValid = false;
             error = err.message || "Failed to validate InxoraStudio token";
+          }
+          break;
+        }
+
+        case "1min": {
+          let token = apiKey.replace(/^Bearer\s+/i, "").replace(/^cookie:\s*/i, "").trim();
+          try {
+            // Extract teamId from JWT payload to build the credits URL.
+            const parts = token.split(".");
+            let teamId = null;
+            if (parts.length === 3) {
+              const payload = JSON.parse(Buffer.from(parts[1], "base64").toString("utf8"));
+              teamId = payload?.uuid;
+            }
+            if (!teamId) {
+              isValid = false;
+              error = "Could not extract team ID from JWT — ensure you copied the full token.";
+              break;
+            }
+            const res = await fetch(`https://api.1min.ai/teams/${teamId}/credits`, {
+              method: "GET",
+              headers: {
+                "x-auth-token": `Bearer ${token}`,
+                "x-app-version": "1.2.3",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
+                signal: AbortSignal.timeout(8000),
+              },
+            });
+            if (res.status === 401 || res.status === 403) {
+              isValid = false;
+              error = "Invalid or expired 1min.ai token — re-copy from app.1min.ai DevTools (x-auth-token header).";
+            } else if (!res.ok) {
+              isValid = false;
+              error = `1min.ai returned ${res.status}`;
+            } else {
+              isValid = true;
+            }
+          } catch (err) {
+            isValid = false;
+            error = err.message || "Failed to validate 1min.ai token";
+          }
+          break;
+        }
+
+        case "1min-api": {
+          // API key from app.1min.ai → API dashboard. Custom `API-KEY` header.
+          const key = (apiKey || "").replace(/^Bearer\s+/i, "").trim();
+          try {
+            const res = await fetch("https://api.1min.ai/api/profile", {
+              method: "GET",
+              headers: {
+                "API-KEY": key,
+                Accept: "application/json",
+              },
+              signal: AbortSignal.timeout(8000),
+            });
+            if (res.status === 401 || res.status === 403) {
+              isValid = false;
+              error = "1min.ai API: key rejected — check the key at app.1min.ai → API.";
+            } else if (!res.ok) {
+              isValid = false;
+              error = `1min.ai API returned ${res.status}`;
+            } else {
+              // Verify the profile payload looks valid (has an id or email).
+              const data = await res.json().catch(() => null);
+              isValid = !!(data?.id || data?.email || data?.userId || data?.credits != null);
+              if (!isValid) error = "1min.ai API: profile response missing account fields.";
+            }
+          } catch (err) {
+            isValid = false;
+            error = err.message || "Failed to validate 1min.ai API key";
           }
           break;
         }

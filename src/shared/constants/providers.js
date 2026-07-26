@@ -9,6 +9,22 @@ const MEDIA_ENTRY_KEYS = [
   "modelsFetcher", "mediaPriority", "hiddenKinds",
 ];
 
+// Default capability sets — must mirror open-sse/services/providerCapabilities.js.
+// Web cookie providers lack tool use + file access (browser chat endpoints).
+const FULL_CAPS = { toolUse: true, fileAccess: true, streaming: true, multiTurn: true };
+const WEB_COOKIE_CAPS = { toolUse: false, fileAccess: false, streaming: true, multiTurn: true };
+const DEFAULT_CAPS_BY_CATEGORY = { webCookie: WEB_COOKIE_CAPS };
+
+/**
+ * Resolve capabilities for a registry entry: explicit override > category default > full.
+ * Mirrors open-sse/services/providerCapabilities.js getProviderCaps() for UI-side use.
+ */
+function resolveCaps(r) {
+  if (r.capabilities && typeof r.capabilities === "object") return { ...FULL_CAPS, ...r.capabilities };
+  const byCat = DEFAULT_CAPS_BY_CATEGORY[r.category];
+  return byCat ? { ...byCat } : { ...FULL_CAPS };
+}
+
 // Build provider UI object from registry entry
 function buildProviderEntry(r) {
   const mediaFields = {};
@@ -36,6 +52,7 @@ function buildProviderEntry(r) {
     ...(r.authType ? { authType: r.authType } : {}),
     ...(r.authHint ? { authHint: r.authHint } : {}),
     ...(r.comingSoon ? { comingSoon: true } : {}),
+    capabilities: resolveCaps(r),
   };
 }
 

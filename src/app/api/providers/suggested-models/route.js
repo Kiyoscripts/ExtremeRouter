@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getProviderConnectionById } from "@/models";
+import { AI_PROVIDERS } from "@/shared/constants/providers";
 import { FILTERS } from "./filters.js";
 
 export const dynamic = "force-dynamic";
@@ -8,19 +9,18 @@ export const dynamic = "force-dynamic";
  * GET /api/providers/suggested-models
  *
  * Query params:
- *   url          — models endpoint URL (required unless connectionId resolves one)
  *   type         — FILTERS key (required)
- *   connectionId — optional. When set, the server loads the connection's apiKey
- *                  and sends Authorization: Bearer <key>. The key never leaves
- *                  the server — clients only pass the connection id.
+ *   url          — models endpoint URL (used only when connectionId is absent)
+ *   connectionId — optional. When set, the server resolves the URL from
+ *                  trusted provider registry config (not from query param)
+ *                  and sends the connection's API key. This prevents SSRF —
+ *                  an attacker URL can never exfiltrate the token because the
+ *                  server controls both the destination and the credential.
  *
- * Used by the provider detail page to populate the "suggested models" list for
- * providers that expose a public or key-gated /v1/models catalog
- * (hcnsec, forge, tokenrouter, featherless, venice, …).
+ * Used by the provider detail page to populate the "suggested models" list.
  */
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
-  let url = searchParams.get("url");
   const type = searchParams.get("type");
   const connectionId = searchParams.get("connectionId");
 
@@ -33,23 +33,35 @@ export async function GET(request) {
     return NextResponse.json({ error: "Unknown filter type" }, { status: 400 });
   }
 
-  // Resolve auth from connection when provided. API keys stay server-side —
-  // the client never sees or transmits the raw key (connections are sanitized
-  // before reaching the browser).
+  let url = null;
   let authHeader = null;
+
   if (connectionId) {
+    // Resolve URL from trusted registry config using the connection's provider ID.
+    // This prevents SSRF — the URL comes from the codebase, not from user input.
+    // The API key also stays server-side (connections are sanitized before reaching the browser).
     try {
       const connection = await getProviderConnectionById(connectionId);
       if (!connection) {
         return NextResponse.json({ error: "Connection not found" }, { status: 404 });
       }
+      const provider = AI_PROVIDERS[connection.provider];
+      const modelsFetcher = provider?.modelsFetcher;
+      if (!modelsFetcher?.url) {
+        return NextResponse.json({ error: "Provider does not support model discovery" }, { status: 400 });
+      }
+      url = modelsFetcher.url;
       const token = connection.apiKey || connection.accessToken;
       if (token) {
         authHeader = `Bearer ${token}`;
       }
     } catch {
-      // Fall through — try unauthenticated fetch
+      return NextResponse.json({ error: "Failed to resolve provider config" }, { status: 500 });
     }
+  } else {
+    // Fallback: no connection, use query param URL (public catalogs).
+    // This path is for providers without auth (e.g., OpenRouter free models).
+    url = searchParams.get("url");
   }
 
   if (!url) {

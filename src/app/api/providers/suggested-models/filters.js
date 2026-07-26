@@ -47,6 +47,15 @@ export const FILTERS = {
       .filter((m) => m.id);
   },
 
+  // 1min.ai — /models returns { models: [{ model: "Name - Provider", name, provider }] }
+  "1min": (data) => {
+    const models = Array.isArray(data?.models) ? data.models : (Array.isArray(data) ? data : []);
+    return models.map((m) => ({
+      id: m.model || m.id || m.name,
+      name: m.name || m.model || m.id,
+    })).filter((m) => m.id);
+  },
+
   "openrouter-free": (models) =>
     models
       .filter(

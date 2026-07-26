@@ -3,6 +3,7 @@ import { PROVIDERS } from "../config/providers.js";
 import { SSE_DONE, SSE_HEADERS_NO_BUFFER } from "../utils/sseConstants.js";
 import { sseChunk } from "../utils/sse.js";
 import { proxyAwareFetch } from "../utils/proxyFetch.js";
+import { estimateInputTokens, estimateOutputTokens } from "../utils/usageTracking.js";
 
 // DeepSeek Web (chat.deepseek.com) reverse adapter.
 //
@@ -932,13 +933,27 @@ export class DeepSeekWebExecutor extends BaseExecutor {
       await cleanupFn();
       const message = { role: "assistant", content };
       if (reasoningContent) message.reasoning_content = reasoningContent;
+
+      // DeepSeek's web SSE does not carry token counts, so estimate from the
+      // request body and the assembled output (content + reasoning). Using the
+      // pure estimators (not estimateUsage) avoids the +2000 BUFFER_TOKENS
+      // headroom that's meant for stream-pipeline context-window math, not for
+      // cost/quota tracking. See open-sse/utils/usageTracking.js.
+      const outputLen = content.length + (reasoningContent?.length || 0);
+      const promptTokens = estimateInputTokens(bodyObj);
+      const completionTokens = estimateOutputTokens(outputLen);
       const openaiResponse = {
         id: `chatcmpl-${Date.now()}`,
         object: "chat.completion",
         created: Math.floor(Date.now() / 1000),
         model: model || modelType,
         choices: [{ index: 0, message, finish_reason: "stop", logprobs: null }],
-        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        usage: {
+          prompt_tokens: promptTokens,
+          completion_tokens: completionTokens,
+          total_tokens: promptTokens + completionTokens,
+          estimated: true,
+        },
       };
       return {
         response: new Response(JSON.stringify(openaiResponse), {

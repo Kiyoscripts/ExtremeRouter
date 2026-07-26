@@ -242,7 +242,7 @@ export class InxorastudioWebExecutor extends BaseExecutor {
                     id: cid, object: "chat.completion.chunk", created, model: modelId,
                     choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
                   };
-                  if (assistant?.inputTokens && assistant?.outputTokens) {
+                  if (Number.isFinite(assistant?.inputTokens) && Number.isFinite(assistant?.outputTokens)) {
                     finalChunk.usage = {
                       prompt_tokens: assistant.inputTokens,
                       completion_tokens: assistant.outputTokens,
@@ -256,10 +256,20 @@ export class InxorastudioWebExecutor extends BaseExecutor {
             }
           }
         } catch (err) {
-          if (!signal?.aborted) controller.error(err);
+          if (!signal?.aborted) {
+            controller.error(err);
+            return;
+          }
         } finally {
-          controller.enqueue(encoder.encode(SSE_DONE));
-          controller.close();
+          // Only enqueue DONE + close if controller is not already errored.
+          // After controller.error(), enqueue/close throw TypeError and
+          // produce an unhandled rejection that masks the original error.
+          try {
+            controller.enqueue(encoder.encode(SSE_DONE));
+            controller.close();
+          } catch {
+            // Controller already errored or closed — nothing to do.
+          }
         }
       },
     });

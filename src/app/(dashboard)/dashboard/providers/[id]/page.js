@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Card, Button, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, IFlowCookieModal, GitLabAuthModal, EditConnectionModal, ConfirmModal } from "@/shared/components";
+import { Card, Button, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, ZedAuthModal, IFlowCookieModal, GitLabAuthModal, EditConnectionModal, ConfirmModal } from "@/shared/components";
 import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, WEB_COOKIE_PROVIDERS, getProviderAlias, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, AI_PROVIDERS, THINKING_CONFIG } from "@/shared/constants/providers";
 import { getModelsByProviderId } from "@/shared/constants/models";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
@@ -435,9 +435,16 @@ export default function ProviderDetailPage() {
   // exposing the raw API key client-side.
   useEffect(() => {
     const fetcher = (OAUTH_PROVIDERS[providerId] || APIKEY_PROVIDERS[providerId] || FREE_PROVIDERS[providerId] || FREE_TIER_PROVIDERS[providerId] || WEB_COOKIE_PROVIDERS[providerId])?.modelsFetcher;
-    if (!fetcher) return;
+    // Fix #15: Clear stale catalog when switching providers and when no fetcher
+    // exists, preventing a slow response from the previous provider from
+    // overwriting the current provider's model list.
+    if (!fetcher) { setSuggestedModels([]); return; }
+    let cancelled = false;
     const activeConn = connections.find((c) => c.isActive !== false);
-    fetchSuggestedModels(fetcher, { connectionId: activeConn?.id }).then(setSuggestedModels);
+    fetchSuggestedModels(fetcher, { connectionId: activeConn?.id }).then((models) => {
+      if (!cancelled) setSuggestedModels(models);
+    });
+    return () => { cancelled = true; };
   }, [providerId, connections]);
 
   const handleSetAlias = async (modelId, alias, providerAliasOverride = providerAlias) => {
@@ -1157,6 +1164,8 @@ export default function ProviderDetailPage() {
         />
       ) : providerId === "cursor" ? (
         <CursorAuthModal isOpen={showOAuthModal} onSuccess={handleOAuthSuccess} onClose={() => setShowOAuthModal(false)} />
+      ) : providerId === "zed" ? (
+        <ZedAuthModal isOpen={showOAuthModal} onSuccess={handleOAuthSuccess} onClose={() => setShowOAuthModal(false)} />
       ) : providerId === "gitlab" ? (
         <GitLabAuthModal isOpen={showOAuthModal} providerInfo={providerInfo} onSuccess={handleOAuthSuccess} onClose={() => setShowOAuthModal(false)} />
       ) : (

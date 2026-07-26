@@ -23,6 +23,7 @@ import {
   withTimeout,
 } from "./combo.js";
 import { stripIdeSystemPrompt, buildWorkerDirective } from "./swarmPersona.js";
+import { validateComboRoles } from "./providerCapabilities.js";
 import {
   createSwarmRun,
   markStageStart,
@@ -383,6 +384,19 @@ export async function handleSwarmChat({
   // Single-model fast path: no point orchestrating a swarm over one model.
   if (panel.length === 1 && !managerModel && !staffModel && !auditModel) {
     return handleSingleModel(body, panel[0]);
+  }
+
+  // Capability gate: control roles (Manager/Staff/Audit) require tool use +
+  // file access. Web cookie providers cannot serve these roles — reject early
+  // with a clear error rather than failing mid-pipeline. Pass `panel` as
+  // fallback so empty role models (Auto) are validated against panel[0].
+  const roleViolations = validateComboRoles("swarm", { managerModel, staffModel, auditModel }, panel);
+  if (roleViolations.length > 0) {
+    const details = roleViolations.map((v) => v.reason).join(" ");
+    return new Response(
+      JSON.stringify({ error: { message: `Swarm role validation failed: ${details}`, type: "capability_error" } }),
+      { status: 400, headers: { "Content-Type": "application/json" } },
+    );
   }
 
   const run = telemetry

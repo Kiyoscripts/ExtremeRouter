@@ -114,6 +114,17 @@ export const CODEBUDDY_CONFIG = { ...PROVIDER_OAUTH["codebuddy-cn"] };
 // Kimchi OAuth Configuration (Browser token callback flow)
 export const KIMCHI_CONFIG = { ...PROVIDER_OAUTH["kimchi"] };
 
+// Zed Hosted AI — import user_id + access_token from Zed Editor, mint llm_token.
+// Not a browser OAuth flow; credentials are imported from the Zed keychain.
+export const ZED_CONFIG = {
+  ...PROVIDER_OAUTH["zed"],
+  tokenStoragePaths: {
+    linux: "~/.local/share/zed/ (or libsecret keyring)",
+    macos: "macOS Keychain (zed)",
+    windows: "Windows Credential Manager",
+  },
+};
+
 // OAuth timeout (5 minutes)
 export const OAUTH_TIMEOUT = 300000;
 
@@ -137,4 +148,5 @@ export const PROVIDERS = {
   GITLAB: "gitlab",
   CODEBUDDY: "codebuddy-cn",
   KIMCHI: "kimchi",
+  ZED: "zed",
 };

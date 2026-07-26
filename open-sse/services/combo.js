@@ -7,6 +7,7 @@ import { unavailableResponse } from "../utils/error.js";
 import { getCapabilitiesForModel } from "../providers/capabilities.js";
 import { extractTextContent } from "../translator/formats/gemini.js";
 import { isBreakerBlocking } from "./circuitBreaker.js";
+import { validateComboRoles } from "./providerCapabilities.js";
 import REGISTRY from "../providers/registry/index.js";
 
 // Hard capabilities = input modalities; missing one drops request data (e.g. image
@@ -590,6 +591,18 @@ export async function handleFusionChat({ body, models, handleSingleModel, log, c
   // A single-model fusion has nothing to fuse — just answer directly.
   if (panel.length === 1) {
     return handleSingleModel(body, panel[0]);
+  }
+
+  // Capability gate: the Judge role requires tool use + file access. Web cookie
+  // providers cannot review/synthesize panel outputs with codebase context.
+  // Pass `panel` as fallback so empty judgeModel (Auto) is validated against panel[0].
+  const roleViolations = validateComboRoles("fusion", { judgeModel }, panel);
+  if (roleViolations.length > 0) {
+    const details = roleViolations.map((v) => v.reason).join(" ");
+    return new Response(
+      JSON.stringify({ error: { message: `Fusion role validation failed: ${details}`, type: "capability_error" } }),
+      { status: 400, headers: { "Content-Type": "application/json" } },
+    );
   }
 
   const cfg = { ...FUSION_DEFAULTS, ...(tuning || {}) };

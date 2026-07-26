@@ -2,7 +2,56 @@
 
 import { useState } from "react";
 import { Card, Badge, Select, ModelSelectModal, CapacityBadges } from "@/shared/components";
+import { AI_PROVIDERS } from "@/shared/constants/providers";
 import { STRATEGY_OPTIONS, getStrategyMeta, getStrategyLabel } from "./helpers";
+
+/**
+ * Check if a provider (by id) can serve a control role (manager/staff/audit/judge).
+ * Web cookie providers lack toolUse + fileAccess and are blocked from these roles.
+ */
+function canServeControlRole(providerId) {
+  const caps = AI_PROVIDERS[providerId]?.capabilities;
+  if (!caps) return true; // unknown provider — allow (don't over-block)
+  return caps.toolUse !== false && caps.fileAccess !== false;
+}
+
+/**
+ * Resolve the provider id from a "provider/model" combo model string.
+ */
+function providerIdFromModelStr(modelStr) {
+  if (!modelStr || typeof modelStr !== "string") return null;
+  const slashIdx = modelStr.indexOf("/");
+  return slashIdx >= 0 ? modelStr.slice(0, slashIdx) : modelStr;
+}
+
+/**
+ * Check if a role assignment is blocked — considering the panel[0] fallback
+ * for empty (Auto) role values. This mirrors the runtime fallback logic:
+ *   manager empty → panel[0], judge empty → panel[0].
+ *
+ * @param {string} roleValue - the role's model string (may be empty for "Auto")
+ * @param {string[]} panel - combo.models array for fallback resolution
+ * @returns {{blocked:boolean, provider:string|null}} blocked status + the provider id that triggered it
+ */
+function checkRoleBlocked(roleValue, panel) {
+  // If role is explicitly set, check that provider.
+  if (roleValue) {
+    const providerId = providerIdFromModelStr(roleValue);
+    return { blocked: providerId ? !canServeControlRole(providerId) : false, provider: providerId };
+  }
+  // Role is empty (Auto) — check the panel[0] fallback.
+  const fallback = panel && panel.length > 0 ? panel[0] : null;
+  const providerId = providerIdFromModelStr(fallback);
+  return { blocked: providerId ? !canServeControlRole(providerId) : false, provider: providerId };
+}
+
+/**
+ * Filter activeProviders to only those eligible for control roles.
+ * Used when opening ModelSelectModal for Manager/Staff/Audit/Judge pickers.
+ */
+function filterControlEligible(providers) {
+  return providers.filter((p) => canServeControlRole(p.provider));
+}
 
 // ComboCard — redesigned expandable card with strategy visual indicator.
 //
@@ -126,20 +175,34 @@ export default function ComboCard({ combo, modelCaps = {}, activeProviders = [],
           {isFusion && (
             <div className="mb-3">
               <p className="text-[10px] uppercase tracking-wide text-text-muted mb-1.5">Fusion Judge</p>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setShowJudgeSelect(true)}
-                  className="inline-flex max-w-full items-center gap-1 rounded border border-dashed border-primary/40 px-2 py-1 font-mono text-xs text-primary hover:border-primary hover:bg-primary/5"
-                >
-                  <span className="material-symbols-outlined text-[14px]">gavel</span>
-                  <span className="truncate">{judge || `Auto — ${models[0] || "first model"}`}</span>
-                </button>
-                {judge && (
-                  <button onClick={() => onSetStrategy({ judgeModel: "" })} className="p-1 rounded text-text-muted hover:text-red-500 hover:bg-red-500/10" title="Reset to Auto">
-                    <span className="material-symbols-outlined text-[14px]">close</span>
-                  </button>
-                )}
-              </div>
+              {(() => {
+                const { blocked: isJudgeBlocked, provider: judgeProvider } = checkRoleBlocked(judge, models);
+                return (
+                  <div className="flex flex-col gap-1">
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setShowJudgeSelect(true)}
+                        className={`inline-flex max-w-full items-center gap-1 rounded border border-dashed px-2 py-1 font-mono text-xs hover:bg-primary/5 ${isJudgeBlocked ? "border-red-400 text-red-500 hover:border-red-500" : "border-primary/40 text-primary hover:border-primary"}`}
+                      >
+                        <span className="material-symbols-outlined text-[14px]">gavel</span>
+                        <span className="truncate">{judge || `Auto — ${models[0] || "first model"}`}</span>
+                      </button>
+                      {judge && (
+                        <button onClick={() => onSetStrategy({ judgeModel: "" })} className="p-1 rounded text-text-muted hover:text-red-500 hover:bg-red-500/10" title="Reset to Auto">
+                          <span className="material-symbols-outlined text-[14px]">close</span>
+                        </button>
+                      )}
+                    </div>
+                    {isJudgeBlocked && (
+                      <p className="text-[10px] text-red-500">
+                        {judge
+                          ? "⚠ Web cookie providers cannot serve as Judge (no tool use / file access)"
+                          : `⚠ Auto-fallback to "${judgeProvider}" (first combo model) — web cookie cannot serve as Judge`}
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           )}
 
@@ -152,23 +215,36 @@ export default function ComboCard({ combo, modelCaps = {}, activeProviders = [],
                   { key: "manager", label: "Manager", icon: "psychology", value: swarmManager, placeholder: `Auto — ${models[0] || "first"}` },
                   { key: "staff", label: "Staff", icon: "badge", value: swarmStaff, placeholder: "Same as Manager" },
                   { key: "audit", label: "Audit", icon: "fact_check", value: swarmAudit, placeholder: "Same as Staff" },
-                ].map((role) => (
-                  <div key={role.key} className="flex items-center gap-2">
-                    <span className="text-xs font-medium text-text-muted w-16">{role.label}</span>
-                    <button
-                      onClick={() => setShowSwarmRoleSelect(role.key)}
-                      className="inline-flex max-w-full items-center gap-1 rounded border border-dashed border-primary/40 px-2 py-0.5 font-mono text-[11px] text-primary hover:border-primary hover:bg-primary/5"
-                    >
-                      <span className="material-symbols-outlined text-[13px]">{role.icon}</span>
-                      <span className="truncate">{role.value || role.placeholder}</span>
-                    </button>
-                    {role.value && (
-                      <button onClick={() => onSetStrategy({ [`${role.key}Model`]: "" })} className="p-0.5 rounded text-text-muted hover:text-red-500 hover:bg-red-500/10" title={`Reset ${role.label}`}>
-                        <span className="material-symbols-outlined text-[13px]">close</span>
+                ].map((role) => {
+                  // Detect capability violation — considers panel[0] fallback for empty (Auto) roles.
+                  const { blocked: isBlocked, provider: blockedProvider } = checkRoleBlocked(role.value, models);
+                  return (
+                  <div key={role.key} className="flex flex-col gap-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-medium text-text-muted w-16">{role.label}</span>
+                      <button
+                        onClick={() => setShowSwarmRoleSelect(role.key)}
+                        className={`inline-flex max-w-full items-center gap-1 rounded border border-dashed px-2 py-0.5 font-mono text-[11px] hover:bg-primary/5 ${isBlocked ? "border-red-400 text-red-500 hover:border-red-500" : "border-primary/40 text-primary hover:border-primary"}`}
+                      >
+                        <span className="material-symbols-outlined text-[13px]">{role.icon}</span>
+                        <span className="truncate">{role.value || role.placeholder}</span>
                       </button>
+                      {role.value && (
+                        <button onClick={() => onSetStrategy({ [`${role.key}Model`]: "" })} className="p-0.5 rounded text-text-muted hover:text-red-500 hover:bg-red-500/10" title={`Reset ${role.label}`}>
+                          <span className="material-symbols-outlined text-[13px]">close</span>
+                        </button>
+                      )}
+                    </div>
+                    {isBlocked && (
+                      <p className="text-[10px] text-red-500 pl-[76px]">
+                        {role.value
+                          ? `⚠ Web cookie providers cannot serve as ${role.label} (no tool use / file access)`
+                          : `⚠ Auto-fallback to "${blockedProvider}" (first combo model) — web cookie cannot serve as ${role.label}`}
+                      </p>
                     )}
                   </div>
-                ))}
+                  );
+                })}
                 <div className="flex items-center gap-2 text-[11px] text-text-muted">
                   <span className="font-medium">Workers</span>
                   <span>= combo models ({models.length})</span>
@@ -186,24 +262,24 @@ export default function ComboCard({ combo, modelCaps = {}, activeProviders = [],
         </div>
       )}
 
-      {/* Judge model picker */}
+      {/* Judge model picker — control role, filter out web cookie providers */}
       <ModelSelectModal
         isOpen={showJudgeSelect}
         onClose={() => setShowJudgeSelect(false)}
         onSelect={(m) => { onSetStrategy({ judgeModel: m?.value || "" }); setShowJudgeSelect(false); }}
-        activeProviders={activeProviders}
+        activeProviders={filterControlEligible(activeProviders)}
         title="Select Judge Model"
         addedModelValues={judge ? [judge] : []}
         closeOnSelect={true}
       />
 
-      {/* Swarm role pickers */}
+      {/* Swarm role pickers — control roles, filter out web cookie providers */}
       {showSwarmRoleSelect && (
         <ModelSelectModal
           isOpen={true}
           onClose={() => setShowSwarmRoleSelect(null)}
           onSelect={(m) => { onSetStrategy({ [`${showSwarmRoleSelect}Model`]: m?.value || "" }); setShowSwarmRoleSelect(null); }}
-          activeProviders={activeProviders}
+          activeProviders={filterControlEligible(activeProviders)}
           title={`Select ${showSwarmRoleSelect === "manager" ? "Manager" : showSwarmRoleSelect === "staff" ? "Staff" : "Audit"} Model`}
           // L5 FIX: highlight the currently-selected model for this role so the
           // user sees which one is already set (consistent with the judge picker

@@ -30,6 +30,10 @@ import { ZenmuxFreeExecutor } from "./zenmux-free.js";
 import { ApiAirforceExecutor } from "./api-airforce.js";
 import { FreeBuffWebExecutor } from "./freebuff-web.js";
 import { InxorastudioWebExecutor } from "./inxorastudio-web.js";
+import { OneMinExecutor } from "./onemin.js";
+import { OneMinApiExecutor } from "./onemin-api.js";
+import { MarathonExecutor } from "./marathon.js";
+import { ZedExecutor } from "./zed.js";
 import { PerplexityAgentExecutor } from "./perplexity-agent.js";
 import { QwenCloudExecutor } from "./qwencloud.js";
 import { T3ChatWebExecutor } from "./t3-web.js";
@@ -104,6 +108,10 @@ const executors = {
   "api-airforce": new ApiAirforceExecutor(),
   "freebuff-web": new FreeBuffWebExecutor(),
   "inxorastudio-web": new InxorastudioWebExecutor(),
+  "1min": new OneMinExecutor(),
+  "1min-api": new OneMinApiExecutor(),
+  "marathon": new MarathonExecutor(),
+  "zed": new ZedExecutor(),
   "perplexity-agent": new PerplexityAgentExecutor(),
   "qwencloud": new QwenCloudExecutor(),
   lmarena: new LMArenaExecutor(),
@@ -173,6 +181,10 @@ export { ZenmuxFreeExecutor } from "./zenmux-free.js";
 export { ApiAirforceExecutor } from "./api-airforce.js";
 export { FreeBuffWebExecutor } from "./freebuff-web.js";
 export { InxorastudioWebExecutor } from "./inxorastudio-web.js";
+export { OneMinExecutor } from "./onemin.js";
+export { OneMinApiExecutor } from "./onemin-api.js";
+export { MarathonExecutor } from "./marathon.js";
+export { ZedExecutor } from "./zed.js";
 export { PerplexityAgentExecutor } from "./perplexity-agent.js";
 export { QwenCloudExecutor } from "./qwencloud.js";
 export { LMArenaExecutor } from "./lmarena.js";

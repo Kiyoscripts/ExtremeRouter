@@ -383,6 +383,8 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
         // M1 FIX: Log the alternate's failure status so operators can debug
         // "both endpoints down" scenarios instead of seeing only the primary error.
         log?.warn?.("TRANSPORT", `${provider.toUpperCase()} | alternate ${altTransport.format} also failed (HTTP ${altResult.response.status})`);
+        // Restore original transport so downstream retry paths use the correct endpoint.
+        credentials.runtimeTransport = originalTransport;
       }
     } catch (altErr) {
       // M1 FIX: Log the alternate's exception instead of swallowing it silently.

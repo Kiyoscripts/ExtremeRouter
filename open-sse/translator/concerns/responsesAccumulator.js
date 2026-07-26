@@ -280,14 +280,33 @@ export class ResponsesAccumulator {
     this._itemIdToIndex.set(item.id, index);
     if (FUNCTION_CALL_TYPES.has(item.type)) {
       this._hasTools = true;
-      this._tools.set(index, {
-        itemId: item.id || "",
-        callId: item.call_id || "",
-        name: item.name || "",
-        argsBuffer: typeof item.arguments === "string" ? item.arguments : JSON.stringify(item.arguments || ""),
-        done: true,
-        emitted: false,
-      });
+      // Only overwrite if no existing entry (streamed deltas take precedence).
+      // If deltas already populated argsBuffer, keep that — don't clobber with
+      // the terminal snapshot which may be less complete.
+      const existing = this._tools.get(index);
+      if (!existing) {
+        // Fix #8: avoid emitting '""' (JSON.stringify of empty string fallback)
+        // when arguments is absent. Use "" directly.
+        const args = typeof item.arguments === "string"
+          ? item.arguments
+          : (item.arguments != null ? JSON.stringify(item.arguments) : "");
+        this._tools.set(index, {
+          itemId: item.id || "",
+          callId: item.call_id || "",
+          name: item.name || "",
+          argsBuffer: args,
+          done: true,
+          emitted: false,
+        });
+        if (item.id) this._toolsByItemId.set(item.id, this._tools.get(index));
+        if (item.call_id) this._toolsByCallId.set(item.call_id, this._tools.get(index));
+      } else {
+        // Already streamed — just mark done + fill missing fields.
+        existing.done = true;
+        if (!existing.name && item.name) existing.name = item.name;
+        if (!existing.callId && item.call_id) existing.callId = item.call_id;
+        if (!existing.itemId && item.id) existing.itemId = item.id;
+      }
     } else if (item.type === "message") {
       this._messages.set(index, {
         itemId: item.id || "",
@@ -431,14 +450,32 @@ export class ResponsesAccumulator {
   /**
    * Get the OpenAI tool_call index for a given item_id or output_index.
    * The index is the position of this tool in arrival order (0-based).
+   *
+   * Fix #9: deduplicate _order by resolved tool entry. Previously the same
+   * tool registered under multiple keys (output_index + item_id) could
+   * return different indexes depending on which alias was passed.
+   * Now we resolve to the actual ToolEntry first, then find its FIRST
+   * occurrence in _order.
+   *
    * @param {string|number} itemIdOrIndex
    * @returns {number}
    */
   toolCallIndexFor(itemIdOrIndex) {
-    const toolKeys = this._order.filter((k) => this._tools.has(k));
-    const resolvedKey = this._resolveToolKey({ item_id: typeof itemIdOrIndex === "string" ? itemIdOrIndex : undefined, output_index: typeof itemIdOrIndex === "number" ? itemIdOrIndex : undefined });
-    const idx = toolKeys.indexOf(resolvedKey);
-    return idx >= 0 ? idx : toolKeys.length;
+    // Resolve to the actual ToolEntry object.
+    const tool = this.getTool(itemIdOrIndex);
+    if (!tool) return 0; // No tool found — default to index 0.
+
+    // Find the FIRST key in _order that maps to this tool entry.
+    const seen = new Set();
+    let toolIndex = 0;
+    for (const key of this._order) {
+      const entry = this._tools.get(key);
+      if (!entry || seen.has(entry)) continue; // Skip aliases of already-counted tools.
+      seen.add(entry);
+      if (entry === tool) return toolIndex;
+      toolIndex++;
+    }
+    return toolIndex;
   }
 
   /**

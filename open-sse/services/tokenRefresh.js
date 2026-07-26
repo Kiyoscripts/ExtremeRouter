@@ -12,6 +12,7 @@ import {
   refreshGitHubToken,
   refreshCopilotToken,
   refreshCodebuddyToken,
+  refreshZedLlmToken,
   classifyOAuthRefreshError,
 } from "./tokenRefresh/providers.js";
 
@@ -130,6 +131,7 @@ const REFRESH_HANDLERS = {
   kiro: (c, log) => refreshKiroToken(c.refreshToken, c.providerSpecificData, log),
   xai: (c, log) => refreshXaiToken(c.refreshToken, log),
   "codebuddy-cn": (c, log) => refreshCodebuddyToken(c.refreshToken, log),
+  zed: (c, log) => refreshZedLlmToken(c.refreshToken, c.providerSpecificData, log),
   vertex: vertexRefreshHandler,
   "vertex-partner": vertexRefreshHandler
 };
@@ -198,6 +200,14 @@ export function formatProviderCredentials(provider, credentials, log) {
         accessToken: credentials.accessToken,
         refreshToken: credentials.refreshToken,
         projectId: credentials.projectId
+      };
+
+    case "zed":
+      return {
+        apiKey: credentials.apiKey,
+        accessToken: credentials.accessToken,
+        refreshToken: credentials.refreshToken,
+        providerSpecificData: credentials.providerSpecificData,
       };
 
     default:

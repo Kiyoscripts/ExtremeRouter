@@ -133,7 +133,6 @@ import p130 from "./qwencloud.js";
 import p131 from "./forge.js";
 import p132 from "./tokenrouter.js";
 import p133 from "./qwen-cloud.js";
-import p134 from "./qwen-cloud-token-plan.js";
 import p135 from "./alibaba.js";
 import p136 from "./alibaba-cn.js";
 import p137 from "./hcnsec.js";
@@ -142,6 +141,10 @@ import p139 from "./inxorastudio-web.js";
 import p140 from "./bynara.js";
 import p141 from "./infron.js";
 import p142 from "./agentrouter.js";
+import p143 from "./onemin.js";
+import p144 from "./onemin-api.js";
+import p145 from "./marathon.js";
+import p146 from "./zed.js";
 
 export default [
   p0,
@@ -278,7 +281,6 @@ export default [
   p131,
   p132,
   p133,
-  p134,
   p135,
   p136,
   p137,
@@ -287,4 +289,8 @@ export default [
   p140,
   p141,
   p142,
+  p143,
+  p144,
+  p145,
+  p146,
 ];

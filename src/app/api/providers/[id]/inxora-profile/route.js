@@ -3,9 +3,12 @@ import { getProviderConnectionById } from "@/lib/localDb";
 
 // GET /api/providers/[id]/inxora-profile
 //
-// Fetches the InxoraStudio Labs user profile (name, email, plan, API key)
+// Fetches the InxoraStudio Labs user profile (name, email, plan)
 // by calling /api/auth/me with the connection's JWT token. Used to display
 // profile info in the provider detail page.
+//
+// Auth: handled by dashboard middleware (same as freebuff-profile).
+// The `apiKey` field is NOT returned to the client (security).
 export async function GET(_request, { params }) {
   try {
     const { id } = await params;
@@ -23,6 +26,7 @@ export async function GET(_request, { params }) {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
         Referer: "https://labs.inxorastudio.com/dashboard",
       },
+      signal: AbortSignal.timeout(8000),
     });
 
     if (res.status === 401 || res.status === 403) {
@@ -43,7 +47,6 @@ export async function GET(_request, { params }) {
       name: u.name || u.email?.split("@")[0] || "User",
       email: u.email || "",
       plan: u.plan || "FREE",
-      apiKey: u.apiKey || "",
       isActive: u.isActive !== false,
     });
   } catch (err) {
