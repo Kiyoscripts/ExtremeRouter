@@ -1,4 +1,4 @@
-# v0.7.7.7 (2026-07-27)
+# v0.7.8 (2026-07-27)
 
 ## Fixes
 - **Qwen Cloud authType fix**: existing `qwen-cloud` connections created before the v0.7.7 merge may have `authType: "cookie"` stored in the DB column (from ambiguous auth resolution in older versions). The registry now definitively declares `authType: "apikey"`. DB migration 003 normalizes the stored authType so the UI shows "API Key" instead of "Cookie Value" with the correct key icon. (Migration 002 could not be edited in-place because the version-gated runner skips already-applied migrations.)
