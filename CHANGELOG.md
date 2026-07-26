@@ -1,24 +1,29 @@
+# v0.7.7.7 (2026-07-27)
+
+## Fixes
+- **Qwen Cloud authType fix**: existing `qwen-cloud` connections created before the v0.7.7 merge may have `authType: "cookie"` stored in the DB column (from ambiguous auth resolution in older versions). The registry now definitively declares `authType: "apikey"`. DB migration 003 normalizes the stored authType so the UI shows "API Key" instead of "Cookie Value" with the correct key icon. (Migration 002 could not be edited in-place because the version-gated runner skips already-applied migrations.)
+
 # v0.7.7 (2026-07-26)
 
 ## Features
-- **Provider Capability Layer**: per-provider `capabilities` field (`toolUse`, `fileAccess`, `streaming`, `multiTurn`) yang mencegah web cookie providers dari serving control roles (Manager/Staff/Audit/Judge) di swarm dan fusion strategies. Auto-derived dari category (webCookie → limited). UI enforcement dengan warning badges + ModelSelectModal filtering. Runtime defensive validation dengan panel[0] fallback resolution. O(1) memoized capability lookup.
-- **New Provider: 1min.ai (API)**: official API-key variant dari 1min.ai. Custom `API-KEY` header, native SSE streaming via `/api/chat-with-ai?isStreaming=true`. 12 seed models (Claude, GPT, DeepSeek, Qwen, GLM, Grok).
-- **New Provider: Marathon (GoKite AI)**: adaptive inference infrastructure dengan 4 completion windows (now/soon/later/anytime). Now mode = synchronous streaming; delayed modes = async poll loop dengan heartbeat SSE keep-alive. Per-connection window selector (MarathonWindowSelector). Up to 65% cost savings untuk delayed modes. 5 flagship models.
-- **New Provider: Zed Hosted AI**: OAuth provider dengan 2-layer auth flow (user credentials → LLM token minting). Auto-refresh LLM token (1h lifetime) saat expired. JSONL streaming translation (multi-provider event extraction: OpenAI/Claude/Gemini/x-ai). Full MITM support untuk Zed Editor (`cloud.zed.dev`). Auto-import dari keychain (Linux secret-tool, macOS Keychain, Windows). 17 models.
-- **Improved Provider: Qwen Cloud (Merged)**: merge `qwen-cloud` + `qwen-cloud-token-plan` → satu provider dengan 3 API formats (OpenAI Chat + OpenAI Responses + Anthropic Messages). Cross-transport fallback aktif. 16 merged models dengan `contextWindow` + `maxOutput` metadata. `reasoningInject` + `thinkingConfig` untuk DeepSeek/Kimi. New official logo (purple gradient). DB migration 002 untuk rename existing connections.
-- **MITM: Zed Editor**: full MITM handler untuk `cloud.zed.dev` — intercept `/completions`, unwrap CompletionBody envelope, wrap response sebagai Zed JSONL. Terdaftar di `/dashboard/mitm` dengan 11 mappable models.
-- **CLI Tool: Grok Build**: entry untuk xAI Grok Build CLI di `/dashboard/cli-tools` dengan step-by-step setup guide (XAI_API_KEY + XAI_BASE_URL + XAI_MODEL).
+- **Provider Capability Layer**: per-provider `capabilities` field (`toolUse`, `fileAccess`, `streaming`, `multiTurn`) that prevents web cookie providers from serving control roles (Manager/Staff/Audit/Judge) in swarm and fusion strategies. Auto-derived from category (webCookie → limited). UI enforcement with warning badges + ModelSelectModal filtering. Runtime defensive validation with panel[0] fallback resolution. O(1) memoized capability lookup.
+- **New Provider: 1min.ai (API)**: official API-key variant of 1min.ai. Custom `API-KEY` header, native SSE streaming via `/api/chat-with-ai?isStreaming=true`. 12 seed models (Claude, GPT, DeepSeek, Qwen, GLM, Grok).
+- **New Provider: Marathon (GoKite AI)**: adaptive inference infrastructure with 4 completion windows (now/soon/later/anytime). Now mode = synchronous streaming; delayed modes = async poll loop with heartbeat SSE keep-alive. Per-connection window selector (MarathonWindowSelector). Up to 65% cost savings for delayed modes. 5 flagship models.
+- **New Provider: Zed Hosted AI**: OAuth provider with 2-layer auth flow (user credentials → LLM token minting). Auto-refresh LLM token (1h lifetime) on expiry. JSONL streaming translation (multi-provider event extraction: OpenAI/Claude/Gemini/x-ai). Full MITM support for Zed Editor (`cloud.zed.dev`). Auto-import from keychain (Linux secret-tool, macOS Keychain, Windows). 17 models.
+- **Improved Provider: Qwen Cloud (Merged)**: merged `qwen-cloud` + `qwen-cloud-token-plan` into a single provider with 3 API formats (OpenAI Chat + OpenAI Responses + Anthropic Messages). Cross-transport fallback enabled. 16 merged models with `contextWindow` + `maxOutput` metadata. `reasoningInject` + `thinkingConfig` for DeepSeek/Kimi. New official logo (purple gradient). DB migration 002 to rename existing connections.
+- **MITM: Zed Editor**: full MITM handler for `cloud.zed.dev` — intercept `/completions`, unwrap CompletionBody envelope, wrap response as Zed JSONL. Registered in `/dashboard/mitm` with 11 mappable models.
+- **CLI Tool: Grok Build**: entry for xAI Grok Build CLI in `/dashboard/cli-tools` with step-by-step setup guide (XAI_API_KEY + XAI_BASE_URL + XAI_MODEL).
 
 ## Fixes
-- **Critical: deepseek-web usage tracking**: hardcoded `usage: {0,0,0}` di non-stream path menyebabkan quota/cost tracking silently drop records. Fixed dengan `estimateInputTokens`/`estimateOutputTokens`.
-- **Critical: zed.js usage tracking**: sama dengan deepseek-web bug — hardcoded zeros di `transformJsonlToJSON`. Fixed dengan estimation dari request body + assembled content.
-- **Critical: Capability gate bypass**: empty `managerModel` (Auto config) melewatkan validation, allowing web cookie `panel[0]` menjadi Manager. Fixed: `validateComboRoles` sekarang resolve empty roles ke `panel[0]` sebelum validate.
-- **High: Priority collision zed vs trae**: kedua providers pakai priority 55. Fixed: zed → 56.
-- **High: Priority collision qwen-cloud vs moonshot**: kedua providers pakai priority 165. Fixed: qwen-cloud → 164.
-- **High: Zed token refresh missing**: `REFRESH_HANDLERS` di `tokenRefresh.js` tidak punya entry zed — health checks/connection tests gagal refresh. Fixed: added `refreshZedLlmToken` + `case "zed"` di `formatProviderCredentials`.
-- **Medium: Marathon executor audit (8 fixes)**: finish_reason ternary no-op, dead config `features.completionWindow`, unverified `validateUrl`, missing 401/403 handling di now mode, invalid `finish_reason: "error"`, dead `errorMsg` variable, requestBody.model inconsistency, dead validateUrl.
+- **Critical: deepseek-web usage tracking**: hardcoded `usage: {0,0,0}` in non-stream path caused quota/cost tracking to silently drop records. Fixed with `estimateInputTokens`/`estimateOutputTokens`.
+- **Critical: zed.js usage tracking**: same bug as deepseek-web — hardcoded zeros in `transformJsonlToJSON`. Fixed with estimation from request body + assembled content.
+- **Critical: Capability gate bypass**: empty `managerModel` (Auto config) skipped validation, allowing web cookie `panel[0]` to become Manager. Fixed: `validateComboRoles` now resolves empty roles to `panel[0]` before validating.
+- **High: Priority collision zed vs trae**: both providers used priority 55. Fixed: zed → 56.
+- **High: Priority collision qwen-cloud vs moonshot**: both providers used priority 165. Fixed: qwen-cloud → 164.
+- **High: Zed token refresh missing**: `REFRESH_HANDLERS` in `tokenRefresh.js` had no zed entry — health checks/connection tests failed to refresh. Fixed: added `refreshZedLlmToken` + `case "zed"` in `formatProviderCredentials`.
+- **Medium: Marathon executor audit (8 fixes)**: finish_reason ternary no-op, dead config `features.completionWindow`, unverified `validateUrl`, missing 401/403 handling in now mode, invalid `finish_reason: "error"`, dead `errorMsg` variable, requestBody.model inconsistency, dead validateUrl.
 - **Medium: Capability Layer perf**: O(n) `REGISTRY.find()` per call → pre-built `PROVIDER_CAPS_CACHE` Map (O(1) lookup).
-- **Build: REGISTRY import**: `import { REGISTRY }` (named) crash karena registry pakai `export default`. Fixed to default import.
+- **Build: REGISTRY import**: `import { REGISTRY }` (named) crashed because registry uses `export default`. Fixed to default import.
 
 # v0.7.6 (2026-07-25)
 
