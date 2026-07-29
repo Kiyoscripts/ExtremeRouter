@@ -322,7 +322,13 @@ describe("DefaultExecutor.buildHeaders() — anthropic-compatible stripping", ()
 
 // ─── proxyFetch anthropicFetch routing ────────────────────────────────────────
 
-describe("proxyAwareFetch — api.anthropic.com routing", () => {
+// Skip these tests if got-scraping is not installed (optional dependency for
+// Anthropic anti-bot TLS impersonation). CI environments may not have it.
+const gotScrapingAvailable = (() => {
+  try { require.resolve("got-scraping"); return true; } catch { return false; }
+})();
+
+describe.skipIf(!gotScrapingAvailable)("proxyAwareFetch — api.anthropic.com routing", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });

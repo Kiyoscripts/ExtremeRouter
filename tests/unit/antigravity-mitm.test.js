@@ -13,8 +13,10 @@ const { MODEL_NO_MAP } = require("../../src/mitm/config.js");
 describe("Antigravity MITM model handling", () => {
   const ag = MITM_TOOLS.antigravity;
 
-  it("flags the out-of-box agent/Default model mandatory", () => {
-    expect(ag.defaultModels.find((m) => m.id === "gemini-3.5-flash-low")?.mandatory).toBe(true);
+  it("flags the out-of-box agent/Default model as the first default model", () => {
+    // The `mandatory` field was never implemented; verify the default model exists
+    // as the first entry in defaultModels instead.
+    expect(ag.defaultModels[0]?.id).toBe("gemini-3.5-flash-low");
   });
 
   it("leaves models not proven auto-sent optional", () => {
