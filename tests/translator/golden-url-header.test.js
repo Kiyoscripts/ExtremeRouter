@@ -27,11 +27,17 @@ const SPECIALIZED = new Set([
 function sanitize(headers) {
   const out = {};
   for (const [k, v] of Object.entries(headers)) {
-    out[k] = typeof v === "string"
+    let val = typeof v === "string"
       ? v.replace(/Bearer .+/, "Bearer <TOK>")
           .replace(/sk-test-APIKEY|tok-test-ACCESS/g, "<CRED>")
           .replace(/kimi-\d{10,}/g, "kimi-<TS>")
       : v;
+    // Normalize platform-specific device model so snapshots are stable
+    // across CI (linux x64) and local dev (win32 x64 / darwin arm64).
+    if (k === "X-Msh-Device-Model" && typeof val === "string") {
+      val = "<platform>";
+    }
+    out[k] = val;
   }
   return out;
 }
@@ -53,21 +59,14 @@ describe("GOLDEN buildUrl (default executor providers)", () => {
   }
 });
 
-// Normalize platform-specific headers so snapshots are stable across
-// CI (linux x64) and local dev (win32 x64 / darwin arm64).
-function normalizePlatformHeaders(str) {
-  if (!str || typeof str !== "string") return str;
-  return str.replace(/("X-Msh-Device-Model":\s*")[^"]*(")/g, "$1<platform>$2");
-}
-
 describe("GOLDEN buildHeaders (default executor providers)", () => {
   for (const pid of providerIds) {
     it(`${pid} → headers (apiKey / oauth)`, () => {
       const ex = new DefaultExecutor(pid);
       const snap = {
-        apiKey: normalizePlatformHeaders(safe(() => sanitize(ex.buildHeaders(PROVIDERS[pid].noAuth ? {} : API_KEY_CRED, true)))),
-        oauth: normalizePlatformHeaders(safe(() => sanitize(ex.buildHeaders(PROVIDERS[pid].noAuth ? {} : OAUTH_CRED, true)))),
-        nonStream: normalizePlatformHeaders(safe(() => sanitize(ex.buildHeaders(PROVIDERS[pid].noAuth ? {} : API_KEY_CRED, false)))),
+        apiKey: safe(() => sanitize(ex.buildHeaders(PROVIDERS[pid].noAuth ? {} : API_KEY_CRED, true))),
+        oauth: safe(() => sanitize(ex.buildHeaders(PROVIDERS[pid].noAuth ? {} : OAUTH_CRED, true))),
+        nonStream: safe(() => sanitize(ex.buildHeaders(PROVIDERS[pid].noAuth ? {} : API_KEY_CRED, false))),
       };
       expect(snap).toMatchSnapshot();
     });

@@ -88,7 +88,7 @@ export default function OneMinAuthModal({ isOpen, onSuccess, onClose }) {
             className="w-full px-3 py-2 text-sm font-mono border border-border rounded-lg bg-background focus:outline-none focus:border-primary resize-none"
           />
           <p className="text-[11px] text-text-muted mt-1">
-            From the <code className="bg-black/5 dark:bg-white/5 px-1 rounded">x-auth-token</code> request header (starts with "Bearer eyJ...")
+            From the <code className="bg-black/5 dark:bg-white/5 px-1 rounded">x-auth-token</code> request header (starts with &quot;Bearer eyJ...&quot;)
           </p>
         </div>
 

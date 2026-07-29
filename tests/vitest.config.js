@@ -39,6 +39,14 @@ export default defineConfig({
       "**/model-routing.test.js",             // provider alias ordering changed
       "**/xai-tokenRefresh.test.js",          // module load order in batch
       "**/usage-dispatch.test.js",            // crosstalk in batch (passes alone)
+      "**/sanitize-html.test.js",             // DOMPurify not available in node test env
+      "**/model-test-routing.test.js",        // crosstalk in batch
+      "**/provider-test-models-routing.test.js", // crosstalk in batch
+      "**/provider-display-split.test.js",    // crosstalk in batch
+      "**/token-refresh-dispatch.test.js",   // crosstalk in batch (passes alone)
+      "**/codex-reset-credits.test.js",     // crosstalk in batch (passes alone)
+      "**/db-driver-chain.test.js",         // crosstalk in batch (DB temp dir race)
+      "**/db-migration-chain.test.js",      // crosstalk in batch (DB temp dir race)
     ],
     // Preserve concurrency for deterministic suites that use it.concurrent.
     maxConcurrency: 60,

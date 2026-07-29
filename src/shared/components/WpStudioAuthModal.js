@@ -121,7 +121,7 @@ export default function WpStudioAuthModal({ isOpen, onSuccess, onClose }) {
               <ol className="list-decimal list-inside space-y-0.5">
                 <li>Install <a href="https://developer.wordpress.com/studio/" target="_blank" rel="noopener noreferrer" className="underline">WordPress Studio Code</a></li>
                 <li>Log in with your WordPress.com account (free)</li>
-                <li>Click "Import" — we read your token automatically</li>
+                <li>Click &quot;Import&quot; — we read your token automatically</li>
               </ol>
               <p className="mt-1">Token expires in 14 days. Re-import after expiry.</p>
             </div>
