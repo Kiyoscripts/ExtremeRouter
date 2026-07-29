@@ -1,4 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+// These tests exercise the loopback Host-header fallback path which is only
+// available when NODE_ENV=development (H2 security fix blocks it in production).
+const originalNodeEnv = process.env.NODE_ENV;
+beforeEach(() => { process.env.NODE_ENV = "development"; });
+afterEach(() => { process.env.NODE_ENV = originalNodeEnv; });
 
 const mocks = vi.hoisted(() => ({
   nextResponse: Symbol("next"),
@@ -216,12 +222,16 @@ describe("dashboard guard local-only access", () => {
     expect(response.body.error).toBe("Local only: CLI token required");
   });
 
-  it("allows local-only route on loopback when requireLogin=false", async () => {
+  it("allows local-only route on loopback when requireLogin=false AND has valid CLI token", async () => {
     mocks.getSettings.mockResolvedValue({ requireLogin: false });
+    // Local-only routes that are also in ALWAYS_PROTECTED require CLI token
+    // or JWT even when requireLogin=false. Use CLI token.
+    mocks.getConsistentMachineId.mockResolvedValue("cli-token");
 
     const response = await proxy(request("/api/cli-tools/antigravity-mitm", {
       host: "localhost:20128",
       origin: "http://localhost:20128",
+      "x-9r-cli-token": "cli-token",
     }));
 
     expect(response).toBe(mocks.nextResponse);

@@ -1,9 +1,12 @@
 // Benchmark: SQLite vs lowdb on equivalent workloads.
 // Run: cd app/tests && npm test -- db-benchmark
+// Skipped when lowdb is not installed (optional dev dependency).
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, it, beforeAll, afterAll, vi } from "vitest";
+
+const lowdbAvailable = (() => { try { require.resolve("lowdb"); return true; } catch { return false; } })();
 
 const N_ITEMS = 500;
 const N_QUERIES = 200;
@@ -48,7 +51,7 @@ afterAll(() => {
   else process.env.DATA_DIR = originalDataDir;
 });
 
-describe("DB Benchmark — SQLite vs Lowdb", () => {
+describe.skipIf(!lowdbAvailable)("DB Benchmark — SQLite vs Lowdb", () => {
   it(`INSERT ${N_ITEMS} provider connections`, async () => {
     console.log(`\n[INSERT ${N_ITEMS}]`);
 
