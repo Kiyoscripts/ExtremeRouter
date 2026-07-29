@@ -34,6 +34,7 @@ import { OneMinExecutor } from "./onemin.js";
 import { OneMinApiExecutor } from "./onemin-api.js";
 import { MarathonExecutor } from "./marathon.js";
 import { ZedExecutor } from "./zed.js";
+import { AgnesWebExecutor } from "./agnes-web.js";
 import { PerplexityAgentExecutor } from "./perplexity-agent.js";
 import { QwenCloudExecutor } from "./qwencloud.js";
 import { T3ChatWebExecutor } from "./t3-web.js";
@@ -112,6 +113,7 @@ const executors = {
   "1min-api": new OneMinApiExecutor(),
   "marathon": new MarathonExecutor(),
   "zed": new ZedExecutor(),
+  "agnes-web": new AgnesWebExecutor(),
   "perplexity-agent": new PerplexityAgentExecutor(),
   "qwencloud": new QwenCloudExecutor(),
   lmarena: new LMArenaExecutor(),
@@ -185,6 +187,7 @@ export { OneMinExecutor } from "./onemin.js";
 export { OneMinApiExecutor } from "./onemin-api.js";
 export { MarathonExecutor } from "./marathon.js";
 export { ZedExecutor } from "./zed.js";
+export { AgnesWebExecutor } from "./agnes-web.js";
 export { PerplexityAgentExecutor } from "./perplexity-agent.js";
 export { QwenCloudExecutor } from "./qwencloud.js";
 export { LMArenaExecutor } from "./lmarena.js";

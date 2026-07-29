@@ -31,7 +31,23 @@ import { syncToJson as syncMitmAliasCache } from "@/lib/mitmAliasCache";
   try { initDbHooks(getSettings, updateSettings); } catch { /* ignore */ }
 })();
 
-process.setMaxListeners(20);
+// Raise limit to accommodate all legitimate shutdown handlers:
+// 3 DB adapters (6) + sqljs (2) + requestDetailsRepo (4) + initializeApp (3) +
+// mitm server (2) + headroom/other (2) = ~19. Set to 40 for headroom.
+process.setMaxListeners(40);
+
+// Global error handlers — prevent a single unhandled rejection from killing
+// the gateway (Node 15+ default is process exit on unhandledRejection).
+// These log the error for diagnostics but allow the process to continue.
+if (!global.__erGlobalHandlersRegistered) {
+  global.__erGlobalHandlersRegistered = true;
+  process.on("unhandledRejection", (reason) => {
+    console.error("[FATAL] Unhandled promise rejection:", reason);
+  });
+  process.on("uncaughtException", (err) => {
+    console.error("[FATAL] Uncaught exception:", err?.stack || err);
+  });
+}
 
 // Survive Next.js hot reload
 const g = global.__appSingleton ??= {

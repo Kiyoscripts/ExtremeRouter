@@ -99,9 +99,13 @@ export function isLocalRequest(request) {
   const realIp = request.headers.get("x-9r-real-ip");
   if (realIp) {
     if (!isLoopbackHostname(realIp)) return false;
-  } else if (!isLoopbackHostname(request.headers.get("host"))) {
-    // Fallback for bare server.js (dev) without custom-server: legacy Host-based check.
-    return false;
+  } else {
+    // No unspoofable x-9r-real-ip header — this means we're running without
+    // custom-server.js (e.g. `next dev` or `next start`). In production this
+    // is unsafe: an external attacker can spoof Host: localhost. Only allow in
+    // development mode where the bind is guaranteed loopback.
+    if (process.env.NODE_ENV !== "development") return false;
+    if (!isLoopbackHostname(request.headers.get("host"))) return false;
   }
   const origin = request.headers.get("origin");
   if (origin) {

@@ -14,6 +14,7 @@ import QwenCloudProfile from "../QwenCloudProfile";
 import InxoraProfile from "../InxoraProfile";
 import OneMinProfile from "../OneMinProfile";
 import OneMinApiProfile from "../OneMinApiProfile";
+import AgnesProfile from "../AgnesProfile";
 import ZenmuxPlanSelector from "../ZenmuxPlanSelector";
 import MarathonWindowSelector from "../MarathonWindowSelector";
 import NoAuthProxyCard from "@/shared/components/NoAuthProxyCard";
@@ -128,6 +129,9 @@ export default function ConnectionsCard({
           )}
           {providerId === "1min-api" && connections.length > 0 && (
             <OneMinApiProfile connectionId={connections[0].id} />
+          )}
+          {providerId === "agnes-web" && connections.length > 0 && (
+            <AgnesProfile connectionId={connections[0].id} />
           )}
         </div>
 

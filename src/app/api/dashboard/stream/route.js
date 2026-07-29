@@ -67,6 +67,10 @@ export async function GET() {
       state.onHealth = (payload) => emit({ type: "health_update", ...payload });
       healthEmitter.on("health:update", state.onHealth);
 
+      // Health degradation → in-app notification (C1 fix: previously only webhooks)
+      state.onHealthDegraded = (payload) => emit(payload);
+      healthEmitter.on("health:degraded", state.onHealthDegraded);
+
       // Keepalive
       state.keepalive = setInterval(() => {
         if (state.closed) { clearInterval(state.keepalive); return; }
@@ -88,6 +92,7 @@ export async function GET() {
     if (state.onStats) statsEmitter.off("update", state.onStats);
     if (state.onBreaker) breakerEmitter.off("breaker:update", state.onBreaker);
     if (state.onHealth) healthEmitter.off("health:update", state.onHealth);
+    if (state.onHealthDegraded) healthEmitter.off("health:degraded", state.onHealthDegraded);
     if (state.keepalive) clearInterval(state.keepalive);
   }
 

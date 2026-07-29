@@ -82,10 +82,13 @@ function buildManagerStrategyPrompt(userPrompt) {
   ].join("\n");
 }
 
-function buildStaffAuditPrompt(subtasks, workerOutputs) {
+function buildStaffAuditPrompt(subtasks) {
+  // Use the id-matched `st.output` field (set by the caller) rather than
+  // positional indexing into workerOutputs — positional breaks when any worker
+  // fails or drops, misaligning every subsequent subtask→output mapping.
   const report = subtasks
-    .map((st, i) => {
-      const out = workerOutputs[i] || "(worker did not produce output)";
+    .map((st) => {
+      const out = st.output || "(worker did not produce output)";
       return `### Subtask ${st.id}: ${st.title}\nRole: ${st.role}\nInstruction: ${st.instruction}\n\n#### Worker Output\n${out}`;
     })
     .join("\n\n---\n\n");
@@ -158,6 +161,50 @@ function extractUserPrompt(body) {
   return "";
 }
 
+/**
+ * Scan a string for top-level JSON object blocks using brace-depth tracking
+ * with string-context awareness. Unlike a regex, this correctly handles braces
+ * inside string values (e.g. code snippets like "function foo() { return 1; }").
+ *
+ * Yields each complete `{...}` substring. Incomplete trailing blocks (unbalanced)
+ * are skipped — this is intentional for recovering subtasks from truncated output.
+ */
+function* scanJsonBlocks(text) {
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escape = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (ch === "\\") {
+      escape = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+
+    if (ch === "{") {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (ch === "}") {
+      depth--;
+      if (depth === 0 && start >= 0) {
+        yield text.slice(start, i + 1);
+        start = -1;
+      }
+    }
+  }
+}
+
 function parseStrategy(text) {
   if (!text) return null;
   // Strip markdown fences if present.
@@ -178,15 +225,13 @@ function parseStrategy(text) {
   // Attempt 2: lenient recovery for truncated JSON. Reasoning models that hit
   // max_tokens mid-output produce a strategy whose trailing braces are missing,
   // so the strict parse above fails. Salvage whatever complete subtask objects
-  // already landed on the wire: scan for each {...} block containing an "id"
-  // field and reconstruct a partial strategy. Partial is strictly better than
-  // discarding the Manager's decomposition and falling back to a direct answer
-  // (which abandons the whole swarm pipeline).
+  // already landed on the wire. Uses a brace-depth scanner that respects
+  // string context (quotes) — the old regex [^{}] broke on braces inside
+  // string values (e.g. code snippets like "return { foo: 1 }").
   const subtaskBlocks = [];
-  const blockRe = /\{[^{}]*?"id"\s*:\s*\d+[^{}]*?\}/gs;
-  let match;
-  while ((match = blockRe.exec(cleaned)) !== null) {
-    const blockText = match[0];
+  for (const blockText of scanJsonBlocks(cleaned)) {
+    // Only accept blocks that look like subtask objects (have an "id" field).
+    if (!/"id"\s*:/.test(blockText)) continue;
     try {
       const parsed = JSON.parse(blockText);
       if (parsed && (parsed.title || parsed.instruction || parsed.role)) {
@@ -220,6 +265,13 @@ function buildPanelBody(body) {
 
 // ── Stage runners ─────────────────────────────────────────────────────────
 
+// Track consecutive gatekeeper failures per provider. If the same provider's
+// gatekeeper keeps failing (timeout, parse error), log a warning so operators
+// can investigate — the fallback to "complex" wastes a full swarm pipeline
+// on every request when the manager model is broken.
+const _gatekeeperFailures = new Map(); // provider → consecutive failure count
+const GATEKEEPER_WARN_THRESHOLD = 3;
+
 async function runGatekeeper({ runId, body, managerModel, handleSingleModel, cfg, log }) {
   markStageStart(runId, "gatekeeper", { model: managerModel });
   const prompt = extractUserPrompt(body);
@@ -230,17 +282,30 @@ async function runGatekeeper({ runId, body, managerModel, handleSingleModel, cfg
     const res = await withTimeout(handleSingleModel(directiveBody, managerModel, true), cfg.managerTimeoutMs);
     if (res?.__timeout || res?.__error) {
       markStageDone(runId, "gatekeeper", { verdict: "complex" }); // assume complex on failure
+      _trackGatekeeperFailure(managerModel, log);
       return "complex";
     }
     const text = extractPanelText(await res.clone().json().catch(() => ({})));
     const verdict = /VERDICT:\s*SIMPLE/i.test(text) ? "simple" : "complex";
     markStageDone(runId, "gatekeeper", { verdict });
+    // Reset failure counter on any successful response (even if verdict is "complex"
+    // — "complex" is a valid verdict, not a failure).
+    _gatekeeperFailures.delete(managerModel);
     log?.info?.("SWARM", `Gatekeeper verdict: ${verdict}`);
     return verdict;
   } catch (e) {
     log?.warn?.("SWARM", `Gatekeeper error, assuming complex: ${e?.message || e}`);
     markStageDone(runId, "gatekeeper", { verdict: "complex" });
+    _trackGatekeeperFailure(managerModel, log);
     return "complex";
+  }
+}
+
+function _trackGatekeeperFailure(managerModel, log) {
+  const count = (_gatekeeperFailures.get(managerModel) || 0) + 1;
+  _gatekeeperFailures.set(managerModel, count);
+  if (count === GATEKEEPER_WARN_THRESHOLD) {
+    log?.warn?.("SWARM", `Gatekeeper has failed ${count} consecutive times for ${managerModel}. Every request is falling through to a full swarm pipeline — the manager model may be degraded.`);
   }
 }
 
@@ -292,6 +357,11 @@ async function dispatchWorkers({ runId, strategy, models, body, handleSingleMode
           markWorkerStatus(runId, i, "error", { model: workerModel });
           return { ok: false, text: "" };
         }
+        // Check HTTP status — a 500/429/503 Response is not a successful worker output.
+        if (!res?.ok) {
+          markWorkerStatus(runId, i, "error", { model: workerModel, status: res?.status });
+          return { ok: false, text: "" };
+        }
         const text = extractPanelText(await res.clone().json().catch(() => ({})));
         markWorkerStatus(runId, i, "done", { model: workerModel, outputLen: text.length });
         return { ok: true, text, subtask };
@@ -324,12 +394,15 @@ async function runStaffAudit({ runId, strategy, workerOutputs, staffModel, audit
     return null;
   }
   markStageStart(runId, "audit", { model });
-  const subtasksWithOutputs = strategy.subtasks.map((st, i) => {
-    const match = workerOutputs.find((w) => w.subtask?.id === st.id);
+  // Match worker outputs to subtasks by reference (not id) — the dispatch
+  // stores the original subtask object reference, so this is always correct
+  // even if the Manager emitted duplicate ids.
+  const subtasksWithOutputs = strategy.subtasks.map((st) => {
+    const match = workerOutputs.find((w) => w.subtask === st);
     return { ...st, output: match?.text || "(no output)" };
   });
   const auditBody = stripIdeSystemPrompt(buildPanelBody(body));
-  const directiveBody = appendUserTurn(auditBody, buildStaffAuditPrompt(subtasksWithOutputs, workerOutputs.map((w) => w.text)));
+  const directiveBody = appendUserTurn(auditBody, buildStaffAuditPrompt(subtasksWithOutputs));
 
   try {
     const res = await withTimeout(handleSingleModel(directiveBody, model, true), cfg.managerTimeoutMs);
@@ -453,8 +526,10 @@ export async function handleSwarmChat({
       log?.warn?.("SWARM", `Only ${workerOutputs.length}/${effectiveSubtasks.length} workers succeeded — fallback`);
       if (runId) markRunComplete(runId, { fallback: true });
       if (workerOutputs.length === 1) {
-        // Return the single worker's output directly.
-        return handleSingleModel(appendUserTurn(body, "The specialist worker produced this answer. Output it verbatim to the user."), manager);
+        // Return the single worker's output directly — include the actual text
+        // so the manager has visibility (previously the text was discarded).
+        const workerText = workerOutputs[0].text || "";
+        return handleSingleModel(appendUserTurn(body, `The specialist worker produced this answer for the subtask "${workerOutputs[0].subtask?.title || ""}". Output it verbatim to the user, adjusting only for formatting if needed:\n\n${workerText}`), manager);
       }
       return handleSingleModel(body, manager);
     }
@@ -473,10 +548,51 @@ export async function handleSwarmChat({
     const synthBody = appendUserTurn(body, synthesisDirective);
     log?.info?.("SWARM", `Synthesizing final answer from ${workerOutputs.length} worker outputs`);
 
-    // Wrap the synthesis call so we can mark telemetry complete after it finishes.
+    // Wrap the synthesis call so telemetry completes when the stream actually
+    // finishes — not when headers arrive. handleSingleModel returns a streaming
+    // Response whose body may still be sending tokens. We tee the body's
+    // completion to fire markStageDone + markRunComplete after the last chunk.
     if (runId) {
       markStageStart(runId, "synthesis", { model: manager });
       const res = await handleSingleModel(synthBody, manager);
+      // If the response has a streaming body, wrap it to detect completion.
+      if (res?.body) {
+        const originalBody = res.body;
+        const trackStream = new ReadableStream({
+          start(controller) {
+            const reader = originalBody.getReader();
+            const pump = () =>
+              reader.read().then(({ done, value }) => {
+                if (done) {
+                  controller.close();
+                  markStageDone(runId, "synthesis");
+                  markRunComplete(runId, { workerCount: workerOutputs.length });
+                  return;
+                }
+                controller.enqueue(value);
+                return pump();
+              }).catch(() => {
+                // Stream error (client disconnect, upstream failure) — mark as
+                // done anyway so the telemetry run doesn't stay stuck "running".
+                try { controller.close(); } catch { /* already closed */ }
+                markStageDone(runId, "synthesis");
+                markRunComplete(runId, { workerCount: workerOutputs.length });
+              });
+            pump();
+          },
+          cancel(reason) {
+            // Client disconnected — mark complete to avoid stuck telemetry.
+            markStageDone(runId, "synthesis");
+            markRunComplete(runId, { workerCount: workerOutputs.length });
+          },
+        });
+        return new Response(trackStream, {
+          status: res.status,
+          statusText: res.statusText,
+          headers: res.headers,
+        });
+      }
+      // Non-streaming response — mark complete immediately.
       markStageDone(runId, "synthesis");
       markRunComplete(runId, { workerCount: workerOutputs.length });
       return res;
@@ -523,23 +639,32 @@ async function runManagerStrategyNoTelemetry({ body, managerModel, handleSingleM
 async function dispatchWorkersNoTelemetry({ strategy, models, body, handleSingleModel, cfg }) {
   const workerModels = models.filter(Boolean);
   if (workerModels.length === 0) return [];
+  // Parse JSON in the parallel .then() (like the telemetry path) instead of
+  // serially after collectPanel settles — avoids N×json-parse latency on the
+  // critical path. Also checks res.ok (M1+C3 alignment) and filters empty
+  // output consistently with the telemetry variant.
   const calls = strategy.subtasks.map((subtask, i) => {
     const workerModel = workerModels[i % workerModels.length];
     const workerBody = appendUserTurn(buildPanelBody(body), buildWorkerDirective(subtask));
-    return withTimeout(handleSingleModel(workerBody, workerModel, true), cfg.workerHardTimeoutMs);
+    return withTimeout(handleSingleModel(workerBody, workerModel, true), cfg.workerHardTimeoutMs)
+      .then(async (res) => {
+        if (res?.__timeout || res?.__error) return { ok: false, text: "" };
+        if (!res?.ok) return { ok: false, text: "" };
+        const text = extractPanelText(await res.clone().json().catch(() => ({})));
+        return { ok: true, text, subtask };
+      })
+      .catch(() => ({ ok: false, text: "" }));
   });
   const settled = await collectPanel(calls, {
     minPanel: Math.min(cfg.workerQuorum, calls.length),
     stragglerGraceMs: cfg.stragglerGraceMs,
     panelHardTimeoutMs: cfg.workerHardTimeoutMs,
   });
+  // Filter: only include workers with ok:true AND non-empty text.
+  // This matches the telemetry path's behavior (empty output → not counted).
   const outputs = [];
-  for (let i = 0; i < settled.length; i++) {
-    const r = settled[i];
-    if (r && !r.__timeout && !r.__error) {
-      const text = extractPanelText(await r.clone().json().catch(() => ({})));
-      if (text) outputs.push({ subtask: strategy.subtasks[i], text });
-    }
+  for (const r of settled) {
+    if (r && r.ok && r.text) outputs.push({ subtask: r.subtask, text: r.text });
   }
   return outputs;
 }
@@ -547,12 +672,13 @@ async function dispatchWorkersNoTelemetry({ strategy, models, body, handleSingle
 async function runStaffAuditNoTelemetry({ strategy, workerOutputs, staffModel, auditModel, body, handleSingleModel, cfg }) {
   const model = staffModel || auditModel;
   if (!model) return null;
-  const subtasksWithOutputs = strategy.subtasks.map((st, i) => {
-    const match = workerOutputs.find((w) => w.subtask?.id === st.id);
+  // Match by reference (same as telemetry path) — robust against duplicate ids.
+  const subtasksWithOutputs = strategy.subtasks.map((st) => {
+    const match = workerOutputs.find((w) => w.subtask === st);
     return { ...st, output: match?.text || "(no output)" };
   });
   const auditBody = stripIdeSystemPrompt(buildPanelBody(body));
-  const directiveBody = appendUserTurn(auditBody, buildStaffAuditPrompt(subtasksWithOutputs, workerOutputs.map((w) => w.text)));
+  const directiveBody = appendUserTurn(auditBody, buildStaffAuditPrompt(subtasksWithOutputs));
   try {
     const res = await withTimeout(handleSingleModel(directiveBody, model, true), cfg.managerTimeoutMs);
     if (res?.__timeout || res?.__error) return null;

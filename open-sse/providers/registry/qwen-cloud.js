@@ -55,6 +55,13 @@ export default {
       header: "Authorization",
       scheme: "bearer",
     },
+    // DashScope rejects stream_options: it errors "'stream_options' only set
+    // this when you set stream: true" (when stream is false) and
+    // "'stream' and 'stream_options' must be set together as explicitly
+    // required" (when stream is true without the exact shape it expects).
+    // The DefaultExecutor normally injects stream_options for all OpenAI-
+    // compatible providers (for Cline/GLM compat); this quirk opts out.
+    quirks: { dropStreamOptions: true },
   },
   // Multi-endpoint: the engine picks the transport matching the client
   // sourceFormat (skip translation), and falls back to an alternate transport

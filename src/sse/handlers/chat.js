@@ -341,13 +341,19 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
         const errorMsg = lastError || credentials.lastError || "Unavailable";
         const status = lastStatus || Number(credentials.lastErrorCode) || HTTP_STATUS.SERVICE_UNAVAILABLE;
         log.warn("CHAT", `[${provider}/${model}] ${errorMsg} (${credentials.retryAfterHuman})`);
+        // C3 fix: record failure sample so health monitor sees this.
+        recordHealthSample(provider, { success: false, latencyMs: Date.now() - attemptStart, status }, chatSettings);
         return unavailableResponse(status, `[${provider}/${model}] ${errorMsg}`, credentials.retryAfter, credentials.retryAfterHuman);
       }
       if (excludeConnectionIds.size === 0) {
         log.warn("AUTH", `No active credentials for provider: ${provider}`);
+        // C3 fix: record failure sample.
+        recordHealthSample(provider, { success: false, latencyMs: 0, status: 404 }, chatSettings);
         return errorResponse(HTTP_STATUS.NOT_FOUND, `No active credentials for provider: ${provider}`);
       }
       log.warn("CHAT", "No more accounts available", { provider });
+      // C3 fix: record failure sample.
+      recordHealthSample(provider, { success: false, latencyMs: 0, status: lastStatus || 503 }, chatSettings);
       return errorResponse(lastStatus || HTTP_STATUS.SERVICE_UNAVAILABLE, lastError || "All accounts unavailable");
     }
 
@@ -411,7 +417,12 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
     }).catch(err => {
       // Probe-slot leak fix: if handleChatCore throws (abort, network error),
       // release the claimed half-open probe slot so the breaker doesn't get stuck.
-      releaseBreakerProbe(provider);
+      // Skip for panel calls (skipBreaker) — no probe was claimed.
+      if (!opts.skipBreaker) releaseBreakerProbe(provider);
+      // C3 fix: record failure sample for thrown exceptions (abort, network error).
+      if (!opts.skipBreaker) {
+        recordHealthSample(provider, { success: false, latencyMs: Date.now() - attemptStart, status: 0 }, chatSettings);
+      }
       throw err;
     });
 
@@ -438,6 +449,12 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
     recordHealthSample(provider, { success: false, latencyMs, status: result.status }, chatSettings);
     if (isRetryableFailure(result.status) && !opts.skipBreaker) {
       recordBreakerFailure(provider, result.status, chatSettings);
+    } else if (!opts.skipBreaker) {
+      // Probe-slot leak fix: non-retryable errors (400/401/403) in half-open
+      // state neither record failure nor release the probe slot — the breaker
+      // would get stuck at capacity until cooldown. Release explicitly so the
+      // next request can claim a probe slot.
+      releaseBreakerProbe(provider);
     }
 
     if (shouldFallback) {

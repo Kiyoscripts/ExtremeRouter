@@ -7,6 +7,7 @@ import { unavailableResponse } from "../utils/error.js";
 import { getCapabilitiesForModel } from "../providers/capabilities.js";
 import { extractTextContent } from "../translator/formats/gemini.js";
 import { isBreakerBlocking } from "./circuitBreaker.js";
+import { getProviderHealth } from "./healthMonitor.js";
 import { validateComboRoles } from "./providerCapabilities.js";
 import REGISTRY from "../providers/registry/index.js";
 
@@ -60,6 +61,17 @@ export function filterBreakerOpenModels(models, breakerSettings) {
     const providerId = prefix ? (ALIAS_TO_ID.get(prefix) || prefix) : "";
     if (providerId && isBreakerBlocking(providerId, breakerSettings)) {
       skipped.push(m);
+    } else if (providerId) {
+      // H2 fix: shed traffic from severely degraded providers (success rate < 50%).
+      // Unlike the breaker (which only trips on consecutive failures), this catches
+      // providers that are returning 50/50 success/failure — degraded but not dead.
+      // Only applies when there are alternative models available.
+      const health = getProviderHealth(providerId);
+      if (health && health.total >= 10 && health.successRate !== null && health.successRate < 0.5) {
+        skipped.push(m);
+      } else {
+        active.push(m);
+      }
     } else {
       active.push(m);
     }
@@ -408,7 +420,7 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
 
   log.warn("COMBO", `All models failed | ${msg}`);
   return new Response(
-    JSON.stringify({ error: { message: msg } }),
+    JSON.stringify({ error: { message: msg, type: "server_error", code: "all_models_failed" } }),
     { status, headers: { "Content-Type": "application/json" } }
   );
 }

@@ -1,3 +1,52 @@
+# v0.7.9 (2026-07-29)
+
+## Features
+- **New Provider: Agnes AI (Web)**: cookie-based provider for Agnes agentic AI assistant. Custom executor translates SSE event stream (AgentStart → MessageDelta → AgentEnd) into OpenAI chat.completion.chunk. Supports multi-turn context, profile badge with credit balance.
+- **New Provider: Agnes AI (API)**: official API key access to Agnes models via apihub.agnes-ai.com. OpenAI-compatible with vision, reasoning, and image generation support. No custom executor needed.
+- **New Provider: ExtremeRouter (Exclusive)**: exclusive provider powered by qwen2api proxy for Qwen models (3.6/3.7/3.8). No API key required. Dual endpoint with automatic fallback (Netlify → custom domain).
+- **New Provider: StepFun**: API key provider with 3 API formats (OpenAI Chat + Responses + Anthropic Messages). Supports streaming, reasoning effort, vision, video, function calling, and image generation/editing.
+- **New Provider: WordPress Studio Code**: OAuth provider that imports credentials from Studio Code's `~/.studio/shared.json`. Dual transport (Anthropic + OpenAI) for Claude and GPT models via WordPress.com AI proxy. Auto-import from keychain.
+- **CLI Tool: Grok Build**: step-by-step setup guide for xAI Grok Build CLI in `/dashboard/cli-tools`.
+- **1min.ai (Web) 3-Field Auth Modal**: replaced single JWT input with a custom modal accepting 3 separate fields (JWT, TeamId, Cookies). User-provided teamId fixes the original validation bug where the JWT payload uuid (user UUID) was used instead of the team UUID.
+- **1min.ai Model Discovery Fix**: modelsFetcher now correctly extracts `modelId` field (not display name) from the 1min.ai models API response.
+
+## Fixes
+- **Critical: deepseek-web + zed.js usage tracking**: hardcoded `usage: {0,0,0}` in non-stream paths caused quota/cost tracking to silently drop records. Fixed with `estimateInputTokens`/`estimateOutputTokens`.
+- **Critical: Capability gate bypass**: empty `managerModel` (Auto config) skipped validation, allowing web cookie `panel[0]` to become Manager. Fixed: `validateComboRoles` now resolves empty roles to `panel[0]`.
+- **Critical: Swarm single-worker output discarded**: worker text was never included in manager directive — manager hallucinated from scratch. Fixed: actual worker text included.
+- **Critical: Swarm staff audit prompt misalignment**: positional indexing broke when any worker failed, misidentifying which worker produced which output. Fixed: uses id-matched `st.output` field.
+- **Critical: Swarm HTTP-failed workers counted as success**: 500/429/503 Response objects counted toward quorum in telemetry path. Fixed: checks `res.ok` before counting.
+- **Critical: Health degraded notifications never fired**: `dispatchAlert` only delivered to webhooks, not the dashboard SSE stream. Fixed: emits `health:degraded` event on SSE so NotificationBell picks it up.
+- **Critical: Health sampling skipped on terminal failures**: thrown exceptions, no-credentials, all-rate-limited paths never recorded failure samples. Fixed: all terminal exit paths now record samples.
+- **High: Priority collisions** (zed 55→56, qwen-cloud 165→164).
+- **High: Zed token refresh missing from REFRESH_HANDLERS**.
+- **High: Swarm telemetry per-worker events deduplicated**: key ignored worker index, only last worker visible. Fixed: includes worker index in dedup key.
+- **High: Swarm synthesis marked complete before stream finished**: telemetry showed "done" while user still receiving tokens. Fixed: wraps stream body with completion detector.
+- **High: Qwen Cloud stream_options 400**: DashScope rejects `stream_options`. Added `quirks.dropStreamOptions` to registry + DefaultExecutor guard.
+- **High: Host:localhost auth spoofing bypass**: removed fallback for non-dev environments.
+- **High: OAuth refresh timeouts**: all token-refresh `fetch()` calls now bounded by 15s timeout.
+- **High: Circuit breaker probe slot leak**: non-retryable errors (400/401/403) in half-open state leaked probe slot. Fixed: explicit `releaseBreakerProbe`.
+- **High: Health metrics don't influence routing**: combo model filtering now skips providers with <50% success rate (min 10 samples).
+- **Medium: Swarm telemetry vs non-telemetry divergence**: aligned empty-output filtering, parallelized JSON parsing.
+- **Medium: parseStrategy recovery regex broke on braces in string values**: replaced with brace-depth scanner respecting string context.
+- **Medium: Worker subtask matching by duplicate id**: uses reference matching instead of id matching.
+- **Medium: Gatekeeper failure escalation**: tracks consecutive failures per provider, warns after 3.
+- **Medium: Health system improvements**: cached aggregates (M1), timer cancellation on disable (M2), raised listener cap (M3), provider display name resolution from registry (M4), timeline empty buckets show null instead of 0ms (M5).
+- **Medium: Provider test results now reflected in Health dashboard**: `recordHealthSample` called from `testSingleConnection`.
+- **Medium: Error response shape consistency**: streamingHandler, unavailableResponse, combo fallback now include `type` + `code`.
+- **Medium: Token refresh `_refreshFetch` wrapper**: bounded fetch wrapper fixed from broken in-function scoping.
+- **Fix: sanitizeHtml SSR crash**: `DOMPurify.addHook()` called at module load crashed in SSR (no `window`). Guarded with `isBrowser` check.
+- **Fix: MaxListenersExceededWarning**: raised limit to 40, fixed sqljsAdapter `.on` → `.once` to prevent HMR leak.
+- **Fix: Dead duplicate vertex/vertex-partner validate case removed.**
+- **Fix: `buildStaffAuditPrompt` unused second parameter removed.**
+- **Fix: Telemetry `markRunComplete` / `markStageDone` / `markRunError` idempotency guards added.**
+
+## Infrastructure
+- **Shared `parseEventStream` helper**: added to `open-sse/utils/sse.js` for gradual SSE parser deduplication across executors.
+- **Structured logger**: `src/lib/logger.js` wraps console.* with level filtering + tag context.
+- **`useToolConfig` hook + `<ToolCardShell>`**: shared state management for CLI ToolCards (available for incremental migration).
+- **Global `unhandledRejection` / `uncaughtException` handler**: prevents gateway crash on unhandled promises.
+
 # v0.7.8 (2026-07-27)
 
 ## Fixes

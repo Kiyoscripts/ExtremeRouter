@@ -47,12 +47,14 @@ export const FILTERS = {
       .filter((m) => m.id);
   },
 
-  // 1min.ai — /models returns { models: [{ model: "Name - Provider", name, provider }] }
+  // 1min.ai — /models returns model objects with `modelId` as the wire id.
+  // UNIFY_CHAT_WITH_AI returns a bare array; CODE_GENERATOR wraps in { models, total }.
   "1min": (data) => {
     const models = Array.isArray(data?.models) ? data.models : (Array.isArray(data) ? data : []);
     return models.map((m) => ({
-      id: m.model || m.id || m.name,
-      name: m.name || m.model || m.id,
+      id: m.modelId || m.model || m.id || m.name,
+      name: m.name || m.modelId || m.model || m.id,
+      contextLength: m.creditMetadata?.CONTEXT || undefined,
     })).filter((m) => m.id);
   },
 

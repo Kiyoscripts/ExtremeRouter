@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Card, Button, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, ZedAuthModal, IFlowCookieModal, GitLabAuthModal, EditConnectionModal, ConfirmModal } from "@/shared/components";
+import { Card, Button, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, ZedAuthModal, OneMinAuthModal, WpStudioAuthModal, IFlowCookieModal, GitLabAuthModal, EditConnectionModal, ConfirmModal } from "@/shared/components";
 import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, WEB_COOKIE_PROVIDERS, getProviderAlias, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, AI_PROVIDERS, THINKING_CONFIG } from "@/shared/constants/providers";
 import { getModelsByProviderId } from "@/shared/constants/models";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
@@ -1164,6 +1164,10 @@ export default function ProviderDetailPage() {
         />
       ) : providerId === "cursor" ? (
         <CursorAuthModal isOpen={showOAuthModal} onSuccess={handleOAuthSuccess} onClose={() => setShowOAuthModal(false)} />
+      ) : providerId === "1min" ? (
+        <OneMinAuthModal isOpen={showOAuthModal} onSuccess={handleOAuthSuccess} onClose={() => setShowOAuthModal(false)} />
+      ) : providerId === "wp-studio" ? (
+        <WpStudioAuthModal isOpen={showOAuthModal} onSuccess={handleOAuthSuccess} onClose={() => setShowOAuthModal(false)} />
       ) : providerId === "zed" ? (
         <ZedAuthModal isOpen={showOAuthModal} onSuccess={handleOAuthSuccess} onClose={() => setShowOAuthModal(false)} />
       ) : providerId === "gitlab" ? (

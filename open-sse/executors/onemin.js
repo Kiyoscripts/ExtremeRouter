@@ -15,7 +15,8 @@ import { proxyAwareFetch } from "../utils/proxyFetch.js";
 //   3. Parse plain text → OpenAI chat.completion.chunk SSE
 //
 // Auth: x-auth-token: Bearer <jwt> (stored as apiKey)
-// Team ID: extracted from JWT payload or stored as providerSpecificData.teamId
+// Team ID: from providerSpecificData.teamId (user-provided) or extracted from JWT payload
+// Cookies: optional, from providerSpecificData.cookies — injected as Cookie header for Cloudflare bypass
 
 const API_BASE = "https://api.1min.ai";
 const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36";
@@ -28,6 +29,10 @@ function normalizeToken(raw) {
 }
 
 // Try to extract team UUID from JWT payload (the "uuid" field).
+// NOTE: the JWT payload uuid is the USER uuid, not the team uuid. The team uuid
+// is only available via providerSpecificData.teamId (user-provided). This fallback
+// exists for backward compat with old JWT-only connections but may return the
+// wrong ID for multi-team accounts.
 function extractTeamId(token) {
   try {
     const parts = token.split(".");
@@ -46,8 +51,8 @@ function errorResponse(status, message) {
   );
 }
 
-function buildHeaders(token) {
-  return {
+function buildHeaders(token, cookies) {
+  const headers = {
     "Content-Type": "application/json",
     Accept: "*/*",
     "x-auth-token": `Bearer ${token}`,
@@ -56,6 +61,16 @@ function buildHeaders(token) {
     Referer: "https://app.1min.ai/",
     "User-Agent": USER_AGENT,
   };
+  // Inject Cookie header if cookies are provided (Cloudflare bypass).
+  if (cookies && typeof cookies === "string" && cookies.trim()) {
+    let cookieStr = cookies.trim();
+    // Strip "Cookie: " prefix if user pasted the full header.
+    if (cookieStr.toLowerCase().startsWith("cookie:")) {
+      cookieStr = cookieStr.replace(/^cookie:\s*/i, "").trim();
+    }
+    headers["Cookie"] = cookieStr;
+  }
+  return headers;
 }
 
 export class OneMinExecutor extends BaseExecutor {
@@ -103,7 +118,8 @@ export class OneMinExecutor extends BaseExecutor {
     const fullText = sysText ? `${sysText}\n\n${userText}` : userText;
 
     const modelId = model || "claude-5-sonnet";
-    const headers = buildHeaders(token);
+    const cookies = credentials?.providerSpecificData?.cookies || "";
+    const headers = buildHeaders(token, cookies);
 
     // Step 1: Create conversation.
     let conversationId;

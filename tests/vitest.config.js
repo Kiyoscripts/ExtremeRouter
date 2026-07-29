@@ -12,8 +12,16 @@ export default defineConfig({
     // Don't scan into git worktrees nested under .claude/ — they carry their
     // own copies of the test files but lack an installed node_modules (open-sse,
     // etc.), which makes provider imports fail during collection.
-    exclude: ["**/node_modules/**", "**/.claude/**", "**/dist/**"],
-    // Allow many it.concurrent cases (real provider smoke runs ~50 providers in parallel)
+    exclude: [
+      "**/node_modules/**",
+      "**/.claude/**",
+      "**/dist/**",
+      // External-provider suites require credentials and network access. Keep the
+      // default suite deterministic so it can safely gate release publishing.
+      "**/*.real.test.js",
+      "**/*.live.test.js",
+    ],
+    // Preserve concurrency for deterministic suites that use it.concurrent.
     maxConcurrency: 60,
     // Suppress noisy console output from handlers under test
     silent: false,

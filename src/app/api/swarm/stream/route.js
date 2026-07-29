@@ -20,9 +20,14 @@ export async function GET() {
         // ignore
       }
 
-      // Live event relay.
+      // Live event relay with backpressure check.
       state.onEvent = (payload) => {
         if (state.closed) return;
+        // Backpressure: if the client is slow and the stream's internal buffer
+        // is full (desiredSize <= 0), drop the event rather than enqueueing
+        // and growing memory unbounded. Stage transitions are transient — a
+        // missed intermediate update is acceptable; the next event will catch up.
+        if (controller.desiredSize !== null && controller.desiredSize <= 0) return;
         try {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
         } catch {

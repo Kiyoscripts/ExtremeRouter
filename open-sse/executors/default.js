@@ -89,6 +89,12 @@ export class DefaultExecutor extends BaseExecutor {
       if (this.config.quirks?.dropClientMetadata) {
         delete transformed.client_metadata;
       }
+      // quirk: DashScope (qwen-cloud) rejects stream_options entirely — it 400s
+      // both with and without stream. Drop any client-sent value and skip the
+      // auto-injection below.
+      if (this.config.quirks?.dropStreamOptions) {
+        delete transformed.stream_options;
+      }
       stripUnsupportedParams(this.provider, model, transformed);
 
       // Inject stream_options for streaming requests — some OpenAI-compatible
@@ -96,10 +102,9 @@ export class DefaultExecutor extends BaseExecutor {
       // is present alongside, returning 500 "'stream' and 'stream_options' must
       // be set together". Adding `{ include_usage: true }` also gives us usage
       // stats in the terminal chunk for accurate token accounting. Mirrors the
-      // pattern in iflow.js/qwen.js. Providers that reject this field are
-      // handled via stripUnsupportedParams rules (e.g. Codex's own executor
-      // deletes it explicitly, so they aren't affected here).
-      if (stream && transformed.messages && !transformed.stream_options) {
+      // pattern in iflow.js/qwen.js. Providers that reject this field opt out
+      // via quirks.dropStreamOptions (above) or stripUnsupportedParams rules.
+      if (stream && transformed.messages && !transformed.stream_options && !this.config.quirks?.dropStreamOptions) {
         transformed.stream_options = { include_usage: true };
       }
     }

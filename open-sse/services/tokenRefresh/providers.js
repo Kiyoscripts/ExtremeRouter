@@ -4,6 +4,24 @@ import { proxyAwareFetch } from "../../utils/proxyFetch.js";
 import { dedupRefresh } from "./dedup.js";
 import { buildExternalIdpRefreshParams } from "../../../src/lib/oauth/kiroExternalIdp.js";
 
+// Timeout for all token-refresh fetch calls. A hung OAuth endpoint pins the
+// provider via dedupRefresh + credential lock, so every refresh fetch MUST
+// be bounded. 15s is generous enough for slow providers but prevents indefinite hangs.
+const REFRESH_TIMEOUT_MS = 15000;
+
+/**
+ * Wrap fetch options with a timeout signal if none is present.
+ * Returns a new options object with signal attached.
+ */
+function withTimeout(options = {}) {
+  if (options.signal) return options; // caller already set a signal
+  return { ...options, signal: AbortSignal.timeout(REFRESH_TIMEOUT_MS) };
+}
+
+// Bounded fetch wrapper for token refresh — prevents hung endpoints from
+// pinning the provider via dedupRefresh + credential lock.
+const _refreshFetch = (url, options) => fetch(url, withTimeout(options));
+
 let _xaiServiceSingleton = null;
 export async function refreshXaiToken(refreshToken, log) {
   if (!refreshToken) return null;
@@ -46,7 +64,7 @@ export async function refreshAccessToken(provider, refreshToken, credentials, lo
 
   return dedupRefresh(provider, refreshToken, async () => {
   try {
-    const response = await fetch(config.refreshUrl, {
+    const response = await _refreshFetch(config.refreshUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -95,7 +113,7 @@ export async function refreshClaudeOAuthToken(refreshToken, log) {
   if (!refreshToken) return null;
   return dedupRefresh("claude", refreshToken, async () => {
   try {
-    const response = await fetch(OAUTH_ENDPOINTS.anthropic.token, {
+    const response = await _refreshFetch(OAUTH_ENDPOINTS.anthropic.token, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -128,7 +146,7 @@ export async function refreshGoogleToken(refreshToken, clientId, clientSecret, l
   if (!refreshToken) return null;
   return dedupRefresh(`google:${clientId}`, refreshToken, async () => {
   try {
-    const response = await fetch(OAUTH_ENDPOINTS.google.token, {
+    const response = await _refreshFetch(OAUTH_ENDPOINTS.google.token, {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -164,7 +182,7 @@ export async function refreshQwenToken(refreshToken, log) {
   const endpoint = OAUTH_ENDPOINTS.qwen.token;
 
   try {
-    const response = await fetch(endpoint, {
+    const response = await _refreshFetch(endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -237,7 +255,7 @@ export async function refreshCodexToken(refreshToken, log) {
   if (!refreshToken) return null;
   return dedupRefresh("codex", refreshToken, async () => {
     try {
-      const response = await fetch(OAUTH_ENDPOINTS.openai.token, {
+      const response = await _refreshFetch(OAUTH_ENDPOINTS.openai.token, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -439,7 +457,7 @@ export async function refreshIflowToken(refreshToken, log) {
   return dedupRefresh("iflow", refreshToken, async () => {
   const basicAuth = btoa(`${PROVIDERS.iflow.clientId}:${PROVIDERS.iflow.clientSecret}`);
 
-  const response = await fetch(OAUTH_ENDPOINTS.iflow.token, {
+  const response = await _refreshFetch(OAUTH_ENDPOINTS.iflow.token, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
@@ -491,7 +509,7 @@ export async function refreshGitHubToken(refreshToken, log) {
     params.client_secret = PROVIDERS.github.clientSecret;
   }
 
-  const response = await fetch(OAUTH_ENDPOINTS.github.token, {
+  const response = await _refreshFetch(OAUTH_ENDPOINTS.github.token, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
@@ -529,7 +547,7 @@ export async function refreshCopilotToken(githubAccessToken, log) {
   if (!githubAccessToken) return null;
   return dedupRefresh("copilot", githubAccessToken, async () => {
   try {
-    const response = await fetch(PROVIDER_OAUTH["github"]?.copilotTokenUrl, {
+    const response = await _refreshFetch(PROVIDER_OAUTH["github"]?.copilotTokenUrl, {
       headers: {
         "Authorization": `token ${githubAccessToken}`,
         "User-Agent": GITHUB_COPILOT.USER_AGENT,
@@ -576,7 +594,7 @@ export async function refreshCodebuddyToken(refreshToken, log) {
   if (!refreshToken) return null;
   return dedupRefresh("codebuddy-cn", refreshToken, async () => {
     const oauth = PROVIDER_OAUTH["codebuddy-cn"] || {};
-    const response = await fetch(oauth.refreshUrl, {
+    const response = await _refreshFetch(oauth.refreshUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

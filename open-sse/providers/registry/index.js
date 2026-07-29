@@ -145,6 +145,11 @@ import p143 from "./onemin.js";
 import p144 from "./onemin-api.js";
 import p145 from "./marathon.js";
 import p146 from "./zed.js";
+import p147 from "./wp-studio.js";
+import p148 from "./agnes-web.js";
+import p149 from "./agnes-api.js";
+import p150 from "./qwen2api.js";
+import p151 from "./stepfun.js";
 
 export default [
   p0,
@@ -293,4 +298,9 @@ export default [
   p144,
   p145,
   p146,
+  p147,
+  p148,
+  p149,
+  p150,
+  p151,
 ];

@@ -1,4 +1,4 @@
-import { getProviderConnectionById, updateProviderConnection } from "@/lib/localDb";
+import { getProviderConnectionById, updateProviderConnection, getSettings } from "@/lib/localDb";
 import { createHash } from "node:crypto";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { testProxyUrl } from "@/lib/network/proxyTest";
@@ -1289,6 +1289,19 @@ export async function testSingleConnection(id) {
   }
 
   await updateProviderConnection(id, updateData);
+
+  // Record health sample so the Health dashboard reflects test results.
+  // This ensures that successful tests clear previous failure samples from
+  // the rolling window, and failed tests are visible immediately.
+  try {
+    const { recordHealthSample } = await import("open-sse/services/healthMonitor.js");
+    const settings = await getSettings();
+    recordHealthSample(connection.provider, {
+      success: result.valid,
+      latencyMs,
+      status: result.valid ? 200 : (result.status || 0),
+    }, settings);
+  } catch { /* non-fatal — health monitor optional */ }
 
   return { valid: result.valid, error: result.error, refreshed: !!result.refreshed, latencyMs, testedAt: new Date().toISOString() };
 }

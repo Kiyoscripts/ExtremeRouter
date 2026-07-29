@@ -222,6 +222,10 @@ export async function GET() {
     try {
       const tokens = extractTokensViaBetterSqlite(dbPath);
       if (tokens.accessToken && tokens.machineId) {
+        // NOTE: returning the raw token to the browser is intentional — the
+        // CursorAuthModal pre-fills the textarea so the user can review/edit
+        // before clicking Import (the import route persists it). The token
+        // lives only in React state (not localStorage), minimizing XSS exposure.
         return NextResponse.json({
           found: true,
           accessToken: tokens.accessToken,

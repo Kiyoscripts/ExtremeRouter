@@ -105,11 +105,11 @@ export async function createSqlJsAdapter(filePath) {
     db.close();
   }
 
-  // Flush on shutdown
+  // Flush on shutdown — use .once to avoid accumulating on HMR re-instantiation.
   const flush = () => { if (dirty) try { persist(); } catch {} };
-  process.on("beforeExit", flush);
-  process.on("SIGINT", flush);
-  process.on("SIGTERM", flush);
+  process.once("beforeExit", flush);
+  process.once("SIGINT", flush);
+  process.once("SIGTERM", flush);
 
   return { driver: "sql.js", run, get, all, exec, transaction, close, raw: db };
 }

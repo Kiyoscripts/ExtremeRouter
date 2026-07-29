@@ -21,25 +21,41 @@ import DOMPurify from "dompurify";
  * - Links get rel="noopener noreferrer" + target="_blank" via hook so
  *   model-rendered links can't tabnab or leak the dashboard URL as referrer.
  *
+ * SSR-safe: DOMPurify requires a browser DOM (window/document). On the server
+ * (Next.js SSR), it has no DOM and its methods are no-ops. We guard all DOMPurify
+ * calls so the module loads without crashing, and sanitization runs only in
+ * the browser where the DOM is available.
+ *
  * @param {string} html - Raw HTML string (typically from a markdown renderer).
  * @returns {string} Sanitized HTML safe for dangerouslySetInnerHTML.
  */
-DOMPurify.addHook("afterSanitizeAttributes", (node) => {
-  if (node.tagName === "A") {
-    node.setAttribute("target", "_blank");
-    node.setAttribute("rel", "noopener noreferrer");
-  }
-  // Deterministic data: URI policy — regex-based ALLOWED_URI_REGEXP is leaky
-  // (its `[^a-z]` clause passes almost anything). Instead, strip any data:
-  // attribute value that isn't an inert raster image. SVG deliberately
-  // excluded: it can carry script/onload even inside a data: URI.
-  for (const attr of ["src", "href", "xlink:href", "action", "formaction"]) {
-    const val = node.getAttribute(attr);
-    if (val && /^\s*data:/i.test(val) && !/^\s*data:image\/(?:png|jpe?g|gif|webp);/i.test(val)) {
-      node.removeAttribute(attr);
+
+// Guard: only register hooks + sanitize when DOMPurify is functional (browser).
+// On server, DOMPurify.sanitize returns the input as-is (no DOM to parse).
+const isBrowser = typeof window !== "undefined" && typeof window.document !== "undefined";
+
+let hooksRegistered = false;
+function ensureHooks() {
+  if (hooksRegistered || !isBrowser) return;
+  hooksRegistered = true;
+
+  DOMPurify.addHook("afterSanitizeAttributes", (node) => {
+    if (node.tagName === "A") {
+      node.setAttribute("target", "_blank");
+      node.setAttribute("rel", "noopener noreferrer");
     }
-  }
-});
+    // Deterministic data: URI policy — regex-based ALLOWED_URI_REGEXP is leaky
+    // (its `[^a-z]` clause passes almost anything). Instead, strip any data:
+    // attribute value that isn't an inert raster image. SVG deliberately
+    // excluded: it can carry script/onload even inside a data: URI.
+    for (const attr of ["src", "href", "xlink:href", "action", "formaction"]) {
+      const val = node.getAttribute(attr);
+      if (val && /^\s*data:/i.test(val) && !/^\s*data:image\/(?:png|jpe?g|gif|webp);/i.test(val)) {
+        node.removeAttribute(attr);
+      }
+    }
+  });
+}
 
 const SANITIZE_CONFIG = {
   FORBID_TAGS: ["style", "form", "input", "textarea", "button", "select", "svg"],
@@ -49,5 +65,8 @@ const SANITIZE_CONFIG = {
 
 export function sanitizeHtml(html) {
   if (typeof html !== "string" || !html) return "";
+  // SSR: return as-is (no DOM available). Client will re-sanitize on hydration.
+  if (!isBrowser) return html;
+  ensureHooks();
   return DOMPurify.sanitize(html, SANITIZE_CONFIG);
 }

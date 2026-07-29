@@ -4,6 +4,15 @@ import { useState, useEffect } from "react";
 import Badge from "@/shared/components/Badge";
 import EmptyState from "@/shared/components/EmptyState";
 import { cn } from "@/shared/utils/cn";
+import { AI_PROVIDERS } from "@/shared/constants/providers";
+
+// M4 fix: resolve provider display name from registry instead of raw capitalize.
+function formatProviderName(providerId) {
+  const info = AI_PROVIDERS[providerId];
+  if (info?.name) return info.name;
+  // Fallback: humanize kebab-case (e.g. "gemini-cli" → "Gemini Cli")
+  return providerId.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
 function healthTier(successRate, total) {
   if (total === 0) return { label: "Unknown", variant: "default", color: "text-text-subtle", bar: "bg-text-subtle" };
@@ -92,7 +101,7 @@ export default function HealthMonitor() {
             return (
               <div key={p.provider} className="rounded-panel border border-border-subtle bg-panel p-4 shadow-[var(--shadow-soft)]">
                 <div className="mb-3 flex items-center justify-between">
-                  <h3 className="truncate font-mono text-sm font-semibold capitalize text-text-main">{p.provider}</h3>
+                  <h3 className="truncate font-mono text-sm font-semibold text-text-main">{formatProviderName(p.provider)}</h3>
                   <Badge variant={tier.variant} dot size="sm">{tier.label}</Badge>
                 </div>
 

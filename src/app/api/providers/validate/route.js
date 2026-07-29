@@ -482,7 +482,8 @@ export async function POST(request) {
           break;
         }
 
-        case "vertex": {
+        case "vertex":
+        case "vertex-partner": {
           // Raw key: probe global endpoint (always 404 for unknown model, never 401)
           // SA JSON: attempt token mint via JWT assertion
           const saJson = (() => { try { const p = JSON.parse(apiKey); return p.type === "service_account" ? p : null; } catch { return null; } })();
@@ -491,20 +492,6 @@ export async function POST(request) {
             isValid = !!(saJson.client_email && saJson.private_key && saJson.project_id);
           } else {
             // Raw key: probe Vertex — 404 means key is valid (model just doesn't exist), 401 means invalid key
-            const probeRes = await fetch(
-              `https://aiplatform.googleapis.com/v1/publishers/google/models/__probe__:generateContent?key=${apiKey}`,
-              { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }
-            );
-            isValid = probeRes.status !== 401 && probeRes.status !== 403;
-          }
-          break;
-        }
-
-        case "vertex-partner": {
-          const saJson = (() => { try { const p = JSON.parse(apiKey); return p.type === "service_account" ? p : null; } catch { return null; } })();
-          if (saJson) {
-            isValid = !!(saJson.client_email && saJson.private_key && saJson.project_id);
-          } else {
             const probeRes = await fetch(
               `https://aiplatform.googleapis.com/v1/publishers/google/models/__probe__:generateContent?key=${apiKey}`,
               { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }
@@ -693,26 +680,35 @@ export async function POST(request) {
         case "1min": {
           let token = apiKey.replace(/^Bearer\s+/i, "").replace(/^cookie:\s*/i, "").trim();
           try {
-            // Extract teamId from JWT payload to build the credits URL.
-            const parts = token.split(".");
-            let teamId = null;
-            if (parts.length === 3) {
-              const payload = JSON.parse(Buffer.from(parts[1], "base64").toString("utf8"));
-              teamId = payload?.uuid;
+            // Prefer teamId from providerSpecificData (user-provided via auth modal).
+            // Fall back to JWT payload uuid for backward compat (may be wrong for multi-team).
+            let teamId = providerSpecificData?.teamId || null;
+            if (!teamId) {
+              const parts = token.split(".");
+              if (parts.length === 3) {
+                const payload = JSON.parse(Buffer.from(parts[1], "base64").toString("utf8"));
+                teamId = payload?.uuid;
+              }
             }
             if (!teamId) {
               isValid = false;
-              error = "Could not extract team ID from JWT — ensure you copied the full token.";
+              error = "Team ID is required. Provide it via the auth modal or as providerSpecificData.teamId.";
               break;
+            }
+            const validateHeaders = {
+              "x-auth-token": `Bearer ${token}`,
+              "x-app-version": "1.2.3",
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
+              signal: AbortSignal.timeout(8000),
+            };
+            // Inject Cookie header if provided (Cloudflare bypass).
+            const cookieStr = providerSpecificData?.cookies;
+            if (cookieStr && typeof cookieStr === "string" && cookieStr.trim()) {
+              validateHeaders["Cookie"] = cookieStr.trim().replace(/^cookie:\s*/i, "").trim();
             }
             const res = await fetch(`https://api.1min.ai/teams/${teamId}/credits`, {
               method: "GET",
-              headers: {
-                "x-auth-token": `Bearer ${token}`,
-                "x-app-version": "1.2.3",
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
-                signal: AbortSignal.timeout(8000),
-              },
+              headers: validateHeaders,
             });
             if (res.status === 401 || res.status === 403) {
               isValid = false;
@@ -726,6 +722,35 @@ export async function POST(request) {
           } catch (err) {
             isValid = false;
             error = err.message || "Failed to validate 1min.ai token";
+          }
+          break;
+        }
+
+        case "agnes-web": {
+          // JWT from app.agnes-ai.com cookie/token. Validate via profile endpoint.
+          const agnesToken = (apiKey || "").replace(/^Bearer\s+/i, "").replace(/^token=\s*/i, "").trim();
+          try {
+            const res = await fetch("https://api.agnes-ai.com/api/v2/user/profile", {
+              method: "GET",
+              headers: {
+                Authorization: `Bearer ${agnesToken}`,
+                "X-Platform": "1",
+                "Content-Type": "application/json",
+              },
+              signal: AbortSignal.timeout(8000),
+            });
+            if (res.status === 401 || res.status === 403) {
+              isValid = false;
+              error = "Agnes token is invalid or expired — re-copy from app.agnes-ai.com.";
+            } else if (!res.ok) {
+              isValid = false;
+              error = `Agnes returned ${res.status}`;
+            } else {
+              isValid = true;
+            }
+          } catch (err) {
+            isValid = false;
+            error = err.message || "Failed to validate Agnes token";
           }
           break;
         }

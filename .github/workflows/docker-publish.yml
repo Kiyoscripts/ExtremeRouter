@@ -11,7 +11,12 @@ env:
   DOCKERHUB_IMAGE: rsalmn/extremerouter
 
 jobs:
+  quality:
+    name: Quality gate
+    uses: ./.github/workflows/quality-gate.yml
+
   build-and-push:
+    needs: quality
     runs-on: ubuntu-latest
     permissions:
       contents: read

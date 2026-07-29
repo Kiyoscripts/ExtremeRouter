@@ -1088,15 +1088,16 @@ export async function getProviderHealthTimeline(providerId, hours = 24) {
     }
 
     // Fill gaps + compute avg latency
+    // M5 fix: use null for empty buckets (no data) instead of 0 (which implies 0ms latency).
     const result = [];
     const totalBuckets = Math.ceil(hours);
     for (let i = 0; i < totalBuckets; i++) {
       const bucketHour = Math.floor((startMs + i * 60 * 60 * 1000) / (60 * 60 * 1000)) * (60 * 60 * 1000);
       const b = buckets.get(bucketHour);
       if (b) {
-        result.push({ ts: b.ts, ok: b.ok, err: b.err, latency: b.latCount > 0 ? Math.round(b.latSum / b.latCount) : 0 });
+        result.push({ ts: b.ts, ok: b.ok, err: b.err, latency: b.latCount > 0 ? Math.round(b.latSum / b.latCount) : null });
       } else {
-        result.push({ ts: new Date(bucketHour).toISOString(), ok: 0, err: 0, latency: 0 });
+        result.push({ ts: new Date(bucketHour).toISOString(), ok: 0, err: 0, latency: null });
       }
     }
     return result;

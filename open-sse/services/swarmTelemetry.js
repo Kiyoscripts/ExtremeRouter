@@ -12,7 +12,7 @@ import { randomUUID } from "node:crypto";
 // Singleton on global to survive Next.js dev hot-reload.
 if (!global._swarmEmitter) {
   global._swarmEmitter = new EventEmitter();
-  global._swarmEmitter.setMaxListeners(100);
+  global._swarmEmitter.setMaxListeners(200);
   global._swarmRuns = new Map(); // runId → SwarmRun
   global._swarmEmitTimers = {}; // key → timeout (debounce)
 }
@@ -29,7 +29,12 @@ const MAX_RUNS_KEPT = 50;
  * emission, mirroring scheduleStatsEvent() from usageRepo.js.
  */
 export function scheduleSwarmEvent(event, payload, delayMs = 120) {
-  const key = `${event}:${payload?.runId || ""}`;
+  // Include worker index in the dedup key so per-worker events (swarm:stage
+  // with different worker indices) are NOT collapsed into one. Previously all
+  // workers in a run shared the key "swarm:stage:<runId>" and only the last
+  // worker's event was emitted — the dashboard lost all other worker statuses.
+  const workerKey = payload?.worker !== undefined ? `:w${payload.worker}` : "";
+  const key = `${event}:${payload?.runId || ""}${workerKey}`;
   if (emitTimers[key]) clearTimeout(emitTimers[key]);
   emitTimers[key] = setTimeout(() => {
     delete emitTimers[key];
@@ -102,6 +107,8 @@ export function markStageDone(runId, stage, extra = {}) {
   if (!run) return;
   const s = run.stages[stage];
   if (!s) return;
+  // Idempotency guard: don't re-complete a stage that's already done.
+  if (s.status === "done") return;
   s.status = "done";
   s.completedAt = Date.now();
   s.durationMs = s.startedAt ? s.completedAt - s.startedAt : null;
@@ -115,6 +122,17 @@ export function markStageDone(runId, stage, extra = {}) {
 export function markWorkerStatus(runId, workerIndex, status, extra = {}) {
   const run = swarmRuns.get(runId);
   if (!run) return;
+  // Grow the workers array dynamically if the index exceeds the pre-allocated
+  // slots (which were based on the configured workerCount, not the actual
+  // subtask count from the Manager strategy).
+  while (run.stages.workers.workers.length <= workerIndex) {
+    run.stages.workers.workers.push({
+      index: run.stages.workers.workers.length,
+      status: "pending",
+      model: null,
+      durationMs: null,
+    });
+  }
   const w = run.stages.workers.workers[workerIndex];
   if (!w) return;
   w.status = status;
@@ -128,6 +146,8 @@ export function markWorkerStatus(runId, workerIndex, status, extra = {}) {
 export function markRunError(runId, error) {
   const run = swarmRuns.get(runId);
   if (!run) return;
+  // Idempotency guard: don't overwrite a terminal state.
+  if (run.status === "done" || run.status === "error") return;
   run.status = "error";
   run.error = String(error?.message || error || "unknown");
   run.completedAt = Date.now();
@@ -141,6 +161,10 @@ export function markRunError(runId, error) {
 export function markRunComplete(runId, extra = {}) {
   const run = swarmRuns.get(runId);
   if (!run) return;
+  // Idempotency guard: if the run is already in a terminal state (done/error),
+  // don't re-mark it. This prevents double swarm:complete events when the
+  // synthesis stream wrapper fires both on natural completion and on cancel.
+  if (run.status === "done" || run.status === "error") return;
   run.status = "done";
   run.completedAt = Date.now();
   run.totalDurationMs = run.completedAt - run.startedAt;
