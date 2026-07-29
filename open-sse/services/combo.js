@@ -7,7 +7,6 @@ import { unavailableResponse } from "../utils/error.js";
 import { getCapabilitiesForModel } from "../providers/capabilities.js";
 import { extractTextContent } from "../translator/formats/gemini.js";
 import { isBreakerBlocking } from "./circuitBreaker.js";
-import { getProviderHealth } from "./healthMonitor.js";
 import { validateComboRoles } from "./providerCapabilities.js";
 import REGISTRY from "../providers/registry/index.js";
 
@@ -49,7 +48,7 @@ for (const entry of REGISTRY) {
  * @param {object} breakerSettings - settings object (reads settings.circuitBreaker)
  * @returns {{ active: string[], skipped: string[] }}
  */
-export function filterBreakerOpenModels(models, breakerSettings) {
+export async function filterBreakerOpenModels(models, breakerSettings) {
   if (!Array.isArray(models) || models.length <= 1) {
     return { active: models || [], skipped: [] };
   }
@@ -63,10 +62,13 @@ export function filterBreakerOpenModels(models, breakerSettings) {
       skipped.push(m);
     } else if (providerId) {
       // H2 fix: shed traffic from severely degraded providers (success rate < 50%).
-      // Unlike the breaker (which only trips on consecutive failures), this catches
-      // providers that are returning 50/50 success/failure — degraded but not dead.
-      // Only applies when there are alternative models available.
-      const health = getProviderHealth(providerId);
+      // Lazy import to avoid circular dependency chain: combo.js → healthMonitor.js
+      // → alertService.js → (back to combo). Static import causes TDZ error in CLI build.
+      let health = null;
+      try {
+        const { getProviderHealth } = await import("./healthMonitor.js");
+        health = getProviderHealth(providerId);
+      } catch { /* health monitor not available — skip shedding */ }
       if (health && health.total >= 10 && health.successRate !== null && health.successRate < 0.5) {
         skipped.push(m);
       } else {
@@ -318,7 +320,7 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
   // per broken model (the reactive fallback path would skip them anyway, but
   // only after a failed attempt). Read-only check — does not claim probe slots.
   if (breakerSettings) {
-    const { active, skipped } = filterBreakerOpenModels(rotatedModels, breakerSettings);
+    const { active, skipped } = await filterBreakerOpenModels(rotatedModels, breakerSettings);
     if (skipped.length > 0) {
       log.info("COMBO", `breaker pre-filter: skipped ${skipped.length} open-breaker model(s) [${skipped.join(", ")}]`);
       rotatedModels = active;
