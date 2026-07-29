@@ -1,3 +1,38 @@
+# v0.8.0 (2026-07-29)
+
+## Features
+- **New Provider: Agnes AI (Web)**: cookie-based provider with custom SSE executor translating AgentStart/MessageDelta/AgentEnd events.
+- **New Provider: Agnes AI (API)**: OpenAI-compatible API key provider with vision, reasoning, and image generation.
+- **New Provider: ExtremeRouter (Exclusive)**: qwen2api proxy with dual endpoint fallback. No API key required.
+- **New Provider: StepFun**: 3 API formats (OpenAI + Responses + Anthropic), image gen/edit, reasoning effort.
+- **New Provider: WordPress Studio Code**: OAuth provider with keychain auto-import from Studio Code.
+- **1min.ai 3-Field Auth Modal**: JWT + TeamId + Cookies with dedicated import route.
+- **CLI Tool: Grok Build**: step-by-step setup guide.
+- **Health System Overhaul**: Health-threshold routing influence (shed degraded providers), cached aggregates, health degraded notifications via SSE.
+- **Swarm Engine Fixes**: 3 critical + 3 high + 7 medium fixes (discarded output, audit misalignment, HTTP-fail quorum, telemetry dedup, slot allocation, synthesis tracking, parseStrategy recovery, gatekeeper escalation).
+- **Security Hardening**: Host:localhost auth spoofing fix, OAuth refresh timeouts, breaker probe leak fix, sanitizeHtml SSR fix, MaxListeners leak fix.
+- **Infrastructure**: Shared parseEventStream helper, structured logger, useToolConfig hook + ToolCardShell.
+
+## Critical Fixes
+- **Circular dependency TDZ error**: combo.js → healthMonitor.js → alertService.js circular import chain caused "Cannot access B before initialization" in CLI build. Fixed with lazy import.
+- **deepseek-web + zed.js usage tracking**: hardcoded `usage: {0,0,0}` caused quota/cost tracking to silently drop records.
+- **Health degraded notifications never fired**: dispatchAlert only delivered to webhooks, not dashboard SSE stream.
+- **Health sampling skipped on terminal failures**: thrown exceptions, no-credentials, all-rate-limited paths never recorded samples.
+- **Swarm single-worker output discarded**: worker text was never included in manager directive.
+- **Swarm staff audit prompt misalignment**: positional indexing broke when workers failed.
+- **Swarm HTTP-failed workers counted as success**: 500/429/503 counted toward quorum.
+
+## Fixes
+- **qwen-cloud stream_options 400**: DashScope rejects stream_options — added quirks.dropStreamOptions.
+- **Qwen Cloud authType fix**: DB migration 003 normalizes authType from cookie to apikey.
+- **1min.ai modelId fix**: modelsFetcher now extracts `modelId` field, not display name.
+- **Provider test results reflected in Health**: `recordHealthSample` called from testSingleConnection.
+- **Error response shape consistency**: streamingHandler, unavailableResponse, combo fallback now include type+code.
+- **parseStrategy recovery regex**: replaced with brace-depth scanner respecting string context.
+- **Worker subtask matching**: uses reference matching instead of id matching for duplicate IDs.
+- **Golden snapshot normalization**: X-Msh-Device-Model normalized to `<platform>` for CI compatibility.
+- **npm audit fix**: updated sharp, postcss, dompurify (monaco-editor).
+
 # v0.7.9 (2026-07-29)
 
 ## Features
