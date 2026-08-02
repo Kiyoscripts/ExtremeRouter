@@ -1,13 +1,33 @@
 import { getProviderConnections, validateApiKey, updateProviderConnection, getSettings, getProxyPools } from "@/lib/localDb";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
-import { formatRetryAfter, checkFallbackError, isModelLockActive, buildModelLockUpdate, getEarliestModelLockUntil } from "open-sse/services/accountFallback.js";
+import { formatRetryAfter, checkFallbackError, isModelLockActive, buildModelLockUpdate, getEarliestModelLockUntil, isKimchiQuotaExhaustedError, buildKimchiQuotaExhaustedUpdate } from "open-sse/services/accountFallback.js";
 import { MAX_RATE_LIMIT_COOLDOWN_MS, RESET_COOLDOWN_CAP_MS } from "open-sse/config/errorConfig.js";
 import { resolveProviderId, FREE_PROVIDERS } from "@/shared/constants/providers.js";
-import { isCircuitOpen } from "open-sse/services/circuitBreaker.js";
+import { isCircuitOpen, breakerKey } from "open-sse/services/circuitBreaker.js";
 import * as log from "../utils/logger.js";
 
-// Mutex to prevent race conditions during account selection
-let selectionMutex = Promise.resolve();
+// Per-provider mutex map — account selection for DIFFERENT providers runs in
+// parallel, while same-provider selections stay serialized (they mutate shared
+// rotation state: lastUsedAt / consecutiveUseCount). Previously ONE global
+// mutex serialized every provider, adding latency under mixed traffic.
+const selectionMutexes = new Map(); // providerId → { tail, release }
+
+function acquireSelectionMutex(providerId) {
+  const prev = selectionMutexes.get(providerId);
+  const prevTail = prev ? prev.tail : Promise.resolve();
+  let release;
+  const tail = new Promise((resolve) => { release = resolve; });
+  selectionMutexes.set(providerId, { tail, release });
+  return {
+    // Wait for the previous holder of THIS provider's lock.
+    wait: prevTail,
+    // Hand the lock to the next acquirer, then auto-cleanup if nobody queued.
+    release: () => {
+      release();
+      if (selectionMutexes.get(providerId)?.tail === tail) selectionMutexes.delete(providerId);
+    },
+  };
+}
 
 /**
  * Get provider credentials from localDb
@@ -22,16 +42,15 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     ? excludeConnectionIds
     : (excludeConnectionIds ? new Set([excludeConnectionIds]) : new Set());
   const preferredConnectionId = options?.preferredConnectionId || null;
-  // Acquire mutex to prevent race conditions
-  const currentMutex = selectionMutex;
-  let resolveMutex;
-  selectionMutex = new Promise(resolve => { resolveMutex = resolve; });
+  // Resolve the provider id FIRST (before acquiring the lock) so the
+  // per-provider mutex is keyed correctly. resolveProviderId is pure — moving
+  // it above the await is safe (it previously ran after a global mutex).
+  const providerId = resolveProviderId(provider);
+  // Acquire THIS provider's mutex — other providers proceed in parallel.
+  const mutex = acquireSelectionMutex(providerId);
 
   try {
-    await currentMutex;
-
-    // Resolve alias to provider ID (e.g., "kc" -> "kilocode")
-    const providerId = resolveProviderId(provider);
+    await mutex.wait;
 
     // Inject a virtual connection for no-auth free providers (with optional proxy pool from settings)
     if (FREE_PROVIDERS[providerId]?.noAuth) {
@@ -213,6 +232,19 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
 
     const resolvedProxy = await resolveConnectionProxyConfig(connection.providerSpecificData || {});
 
+    // Proxy-aware breaker: block this account only if its own (provider, proxy)
+    // breaker is open. A dead proxy does not block other proxies/direct traffic.
+    const proxyKey = breakerKey(providerId, resolvedProxy);
+    if (isCircuitOpen(provider, breakerSettings, proxyKey)) {
+      log.warn("AUTH", `${provider} | breaker OPEN for proxy key "${proxyKey}" — skipping account`);
+      return {
+        allRateLimited: true,
+        rateLimitedUntil: Date.now() + 30000,
+        lastError: `Circuit breaker open (${proxyKey})`,
+        breakerOpen: true,
+      };
+    }
+
     return {
       authType: connection.authType,
       apiKey: connection.apiKey,
@@ -241,7 +273,7 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
       _connection: connection
     };
   } finally {
-    if (resolveMutex) resolveMutex();
+    mutex.release();
   }
 }
 
@@ -295,6 +327,17 @@ export async function markAccountUnavailable(connectionId, status, errorText, pr
     ({ shouldFallback, cooldownMs, newBackoffLevel } = checkFallbackError(status, errorText, backoffLevel));
   }
   if (!shouldFallback) return { shouldFallback: false, cooldownMs: 0 };
+
+  // Kimchi Community-tier quota exhaustion: deactivate the account with a
+  // distinct "quota_exhausted" status + next-day reset, so the periodic
+  // kimchiQuotaReactivation sweep can auto-reactivate it at 00:00 UTC.
+  if (provider === "kimchi" && isKimchiQuotaExhaustedError(status, errorText)) {
+    const update = buildKimchiQuotaExhaustedUpdate();
+    await updateProviderConnection(connectionId, update);
+    const connName = conn?.displayName || conn?.name || conn?.email || connectionId.slice(0, 8);
+    log.warn("AUTH", `${connName} Kimchi quota exhausted — deactivated until ${update.rateLimitedUntil}`);
+    return { shouldFallback: true, cooldownMs: 0, quotaExhausted: true };
+  }
 
   const reason = typeof errorText === "string" ? errorText.slice(0, 100) : "Provider error";
   const lockUpdate = buildModelLockUpdate(model, cooldownMs);

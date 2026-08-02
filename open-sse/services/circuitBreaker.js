@@ -14,6 +14,11 @@
  * network/timeout errors, and 429 rate limits. Client errors (400/401/402/
  * 403/404) do NOT count — they indicate a request problem, not provider health.
  *
+ * PROXY-AWARE: state is keyed by `provider:proxyKey` (breakerKey()). A dead
+ * proxy trips the breaker only for that (provider, proxy) pair, so traffic
+ * through other proxies or direct connections keeps flowing. Calls that pass
+ * no proxy config fall back to the plain provider key (backward compatible).
+ *
  * State is in-memory (resets on restart). This is intentional: a fresh start
  * should give every provider a clean slate.
  */
@@ -21,7 +26,7 @@ import { EventEmitter } from "node:events";
 
 // Singleton on global to survive Next.js dev hot-reload.
 if (!global._circuitBreakers) {
-  global._circuitBreakers = new Map(); // provider → BreakerState
+  global._circuitBreakers = new Map(); // provider[:proxyKey] → BreakerState
   global._breakerEmitter = new EventEmitter();
   global._breakerEmitter.setMaxListeners(50);
 }
@@ -38,6 +43,26 @@ export const BREAKER_DEFAULTS = {
 };
 
 /**
+ * Compute the breaker key for a provider + proxy combo.
+ * Direct traffic → just the provider id (backward compatible with the
+ * original per-provider breaker). Proxied traffic → "provider:proxy:<id>"
+ * so one dead proxy does NOT trip the breaker for the provider's other
+ * proxies or its direct connections.
+ *
+ * @param {string} provider - provider id (or alias)
+ * @param {Object} [proxyConfig] - resolved proxy config (providerSpecificData
+ *   after resolveConnectionProxyConfig: connectionProxyEnabled, Url, PoolId...)
+ * @returns {string}
+ */
+export function breakerKey(provider, proxyConfig) {
+  const pc = proxyConfig && typeof proxyConfig === "object" ? proxyConfig : {};
+  if (!pc.connectionProxyEnabled) return provider;
+  const poolId = pc.connectionProxyPoolId || "";
+  const url = pc.connectionProxyUrl || "";
+  return `${provider}:proxy:${poolId || url}`;
+}
+
+/**
  * Is this status code a "retryable" failure that should count toward the breaker?
  * 5xx = server error (provider down/buggy). 429 = rate limit (provider overloaded).
  * 0 = network/timeout error. Client errors (4xx except 429) don't count.
@@ -47,27 +72,32 @@ export function isRetryableFailure(status) {
   return s === 0 || s === 429 || s >= 500;
 }
 
-function getOrCreate(provider) {
-  let b = breakers.get(provider);
+// key = breakerKey(provider, proxyConfig); falls back to provider when omitted.
+function resolveKey(provider, key) {
+  return key || provider;
+}
+
+function getOrCreate(key) {
+  let b = breakers.get(key);
   if (!b) {
     b = {
-      provider,
+      key,
       state: "closed",
       failures: [], // { ts, status }
       openedAt: null,
       cooldownEndsAt: null,
       halfOpenCalls: 0,
     };
-    breakers.set(provider, b);
+    breakers.set(key, b);
   }
   return b;
 }
 
-function emit(provider) {
-  const b = breakers.get(provider);
+function emit(key) {
+  const b = breakers.get(key);
   if (!b) return;
   breakerEmitter.emit("breaker:update", {
-    provider: b.provider,
+    provider: b.key,
     state: b.state,
     failures: b.failures.length,
     openedAt: b.openedAt,
@@ -85,11 +115,12 @@ function emit(provider) {
  * check (e.g. pre-filtering a combo model list), use `isBreakerBlocking()`
  * instead to avoid consuming probe slots.
  */
-export function isCircuitOpen(provider, settings = {}) {
+export function isCircuitOpen(provider, settings = {}, key = null) {
   const cfg = { ...BREAKER_DEFAULTS, ...(settings?.circuitBreaker || {}) };
   if (!cfg.enabled) return false;
 
-  const b = getOrCreate(provider);
+  const k = resolveKey(provider, key);
+  const b = getOrCreate(k);
   const now = Date.now();
 
   if (b.state === "open") {
@@ -97,7 +128,7 @@ export function isCircuitOpen(provider, settings = {}) {
       // Cooldown elapsed → transition to HALF_OPEN, allow a probe.
       b.state = "halfOpen";
       b.halfOpenCalls = 0;
-      emit(provider);
+      emit(k);
     } else {
       return true; // still OPEN → block
     }
@@ -128,11 +159,12 @@ export function isCircuitOpen(provider, settings = {}) {
  * list as a last resort because the lazy OPEN→HALF_OPEN transition inside
  * isCircuitOpen may have fired by the time the attempt runs.
  */
-export function isBreakerBlocking(provider, settings = {}) {
+export function isBreakerBlocking(provider, settings = {}, key = null) {
   const cfg = { ...BREAKER_DEFAULTS, ...(settings?.circuitBreaker || {}) };
   if (!cfg.enabled) return false;
 
-  const b = breakers.get(provider);
+  const k = resolveKey(provider, key);
+  const b = breakers.get(k);
   if (!b) return false; // no state = never tripped = not blocking
 
   const now = Date.now();
@@ -156,17 +188,18 @@ export function isBreakerBlocking(provider, settings = {}) {
 /**
  * Record a successful request. Resets the breaker to CLOSED (clears failures).
  */
-export function recordBreakerSuccess(provider, settings = {}) {
+export function recordBreakerSuccess(provider, settings = {}, key = null) {
   const cfg = { ...BREAKER_DEFAULTS, ...(settings?.circuitBreaker || {}) };
   if (!cfg.enabled) return;
-  const b = getOrCreate(provider);
+  const k = resolveKey(provider, key);
+  const b = getOrCreate(k);
   if (b.state !== "closed" || b.failures.length > 0) {
     b.state = "closed";
     b.failures = [];
     b.openedAt = null;
     b.cooldownEndsAt = null;
     b.halfOpenCalls = 0;
-    emit(provider);
+    emit(k);
   }
 }
 
@@ -174,11 +207,12 @@ export function recordBreakerSuccess(provider, settings = {}) {
  * Record a failure. If threshold reached within window → trip to OPEN.
  * Only call this for retryable failures (use isRetryableFailure first).
  */
-export function recordBreakerFailure(provider, status, settings = {}) {
+export function recordBreakerFailure(provider, status, settings = {}, key = null) {
   const cfg = { ...BREAKER_DEFAULTS, ...(settings?.circuitBreaker || {}) };
   if (!cfg.enabled) return;
 
-  const b = getOrCreate(provider);
+  const k = resolveKey(provider, key);
+  const b = getOrCreate(k);
   const now = Date.now();
 
   // In HALF_OPEN, any failure re-trips immediately.
@@ -188,7 +222,7 @@ export function recordBreakerFailure(provider, status, settings = {}) {
     b.cooldownEndsAt = now + cfg.cooldownMs;
     b.halfOpenCalls = 0;
     b.failures = [{ ts: now, status }];
-    emit(provider);
+    emit(k);
     return;
   }
 
@@ -203,7 +237,7 @@ export function recordBreakerFailure(provider, status, settings = {}) {
       b.state = "open";
       b.openedAt = now;
       b.cooldownEndsAt = now + cfg.cooldownMs;
-      emit(provider);
+      emit(k);
     }
   }
   // If already OPEN, ignore (we don't count failures while blocked).
@@ -215,8 +249,9 @@ export function recordBreakerFailure(provider, status, settings = {}) {
  * an unhandled exception before reaching recordBreakerSuccess/Failure.
  * Without this, the slot leaks and the breaker sticks at capacity indefinitely.
  */
-export function releaseBreakerProbe(provider) {
-  const b = breakers.get(provider);
+export function releaseBreakerProbe(provider, key = null) {
+  const k = resolveKey(provider, key);
+  const b = breakers.get(k);
   if (!b || b.state !== "halfOpen") return;
   if (b.halfOpenCalls > 0) {
     b.halfOpenCalls--;
@@ -238,7 +273,7 @@ export function getBreakerStates() {
       if (cooldownRemaining === 0) displayState = "halfOpen";
     }
     out.push({
-      provider: b.provider,
+      provider: b.key,
       state: displayState,
       failures: b.failures.length,
       openedAt: b.openedAt,
@@ -251,15 +286,33 @@ export function getBreakerStates() {
 
 /**
  * Manually reset a breaker (for dashboard "force close" action).
+ * When `key` is null, resets EVERY breaker entry for this provider
+ * (all proxy variants) — matching the old per-provider semantics.
  */
-export function resetBreaker(provider) {
-  const b = breakers.get(provider);
-  if (!b) return false;
-  b.state = "closed";
-  b.failures = [];
-  b.openedAt = null;
-  b.cooldownEndsAt = null;
-  b.halfOpenCalls = 0;
-  emit(provider);
-  return true;
+export function resetBreaker(provider, key = null) {
+  if (key) {
+    const b = breakers.get(key);
+    if (!b) return false;
+    b.state = "closed";
+    b.failures = [];
+    b.openedAt = null;
+    b.cooldownEndsAt = null;
+    b.halfOpenCalls = 0;
+    emit(key);
+    return true;
+  }
+  // Reset all entries whose key is the provider itself or prefixed by it.
+  let resetAny = false;
+  for (const [k, b] of breakers) {
+    if (k === provider || k.startsWith(`${provider}:`)) {
+      b.state = "closed";
+      b.failures = [];
+      b.openedAt = null;
+      b.cooldownEndsAt = null;
+      b.halfOpenCalls = 0;
+      emit(k);
+      resetAny = true;
+    }
+  }
+  return resetAny;
 }

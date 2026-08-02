@@ -5,6 +5,30 @@ import { Card, Badge, Select, ModelSelectModal, CapacityBadges } from "@/shared/
 import { AI_PROVIDERS } from "@/shared/constants/providers";
 import { STRATEGY_OPTIONS, getStrategyMeta, getStrategyLabel } from "./helpers";
 
+// ── Thinking constants ──────────────────────────────────────────────
+const THINKING_TYPE_OPTIONS = [
+  { value: "auto",  label: "Auto (provider default)" },
+  { value: "off",   label: "Off" },
+  { value: "effort", label: "Effort (OpenAI-style)" },
+  { value: "extended", label: "Extended (Claude-style)" },
+];
+const THINKING_EFFORT_OPTIONS = [
+  { value: "low",  label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+  { value: "max",  label: "Max" },
+];
+const SWARM_ROLES = [
+  { key: "manager", label: "Manager", icon: "psychology" },
+  { key: "staff",   label: "Staff",   icon: "badge" },
+  { key: "audit",   label: "Audit",   icon: "fact_check" },
+  { key: "worker",  label: "Worker",  icon: "group" },
+];
+const FUSION_ROLES = [
+  { key: "panel", label: "Panel", icon: "dashboard" },
+  { key: "judge", label: "Judge", icon: "gavel" },
+];
+
 /**
  * Check if a provider (by id) can serve a control role (manager/staff/audit/judge).
  * Web cookie providers lack toolUse + fileAccess and are blocked from these roles.
@@ -76,6 +100,47 @@ export default function ComboCard({ combo, modelCaps = {}, activeProviders = [],
   const swarmStaff = strategy.staffModel || "";
   const swarmAudit = strategy.auditModel || "";
   const meta = getStrategyMeta(current);
+  const thinking = strategy.thinking || {};
+  const thinkingType = thinking.type || "auto";
+  const isThinkingActive = thinkingType !== "auto" && thinkingType !== "off";
+  const [expandedRoles, setExpandedRoles] = useState([]);
+
+  // ── Thinking helpers ──────────────────────────────────────────────
+  const setThinking = (patch) => onSetStrategy({ thinking: { ...thinking, ...patch } });
+  const setRoleThinking = (role, patch) => {
+    const roles = { ...(thinking.roles || {}) };
+    if (patch === null) {
+      delete roles[role];
+    } else {
+      roles[role] = { ...(roles[role] || {}), ...patch };
+    }
+    setThinking({ roles });
+  };
+  const roleThinking = (role) => thinking?.roles?.[role];
+
+  // ── Model thinking capability detection ─────────────────────────────
+  // Check every model in the combo to determine which thinking modes are
+  // supported. Grey-out unsupported options and warn when a mode is active
+  // but some models lack it.
+  const modelThinking = models.map(model => ({
+    model,
+    caps: modelCaps[model] || {},
+  }));
+  const hasEffort = modelThinking.some(m => {
+    const fmt = m.caps.thinkingFormat;
+    return !!m.caps.reasoning && (fmt === "openai" || fmt === "effort" || !fmt);
+  });
+  const hasExtended = modelThinking.some(m => {
+    const fmt = m.caps.thinkingFormat;
+    return !!m.caps.reasoning && (fmt === "claude-adaptive" || fmt === "claude" || fmt === "extended");
+  });
+  const hasMaxEffort = modelThinking.some(m => !!m.caps.thinkingMaxEffort);
+  const unresolvableModels = modelThinking.filter(m => !m.caps.reasoning && m.caps.reasoning !== undefined);
+  const unsupportedForCurrent = thinkingType === "effort"
+    ? modelThinking.filter(m => m.caps.reasoning === true && m.caps.thinkingFormat && m.caps.thinkingFormat !== "openai" && m.caps.thinkingFormat !== "effort")
+    : thinkingType === "extended"
+      ? modelThinking.filter(m => m.caps.reasoning === true && m.caps.thinkingFormat && m.caps.thinkingFormat !== "claude-adaptive" && m.caps.thinkingFormat !== "claude" && m.caps.thinkingFormat !== "extended")
+      : [];
 
   return (
     <Card padding="sm" className="group transition-all hover:border-primary/20">
@@ -98,6 +163,12 @@ export default function ComboCard({ combo, modelCaps = {}, activeProviders = [],
             <div className="flex items-center gap-2">
               <code className="truncate font-mono text-sm font-medium">{combo.name}</code>
               <Badge variant={meta.badge} size="sm">{getStrategyLabel(current)}</Badge>
+              {isThinkingActive && (
+                <Badge variant="cyan" size="sm" className="flex items-center gap-0.5">
+                  <span className="material-symbols-outlined text-[10px]">psychology</span>
+                  {thinkingType === "effort" ? thinking.effort || "on" : thinkingType}
+                </Badge>
+              )}
               <span className="text-[10px] text-text-muted">{models.length} models</span>
             </div>
             {/* Model chips — first 3 + "+N more" */}
@@ -251,9 +322,196 @@ export default function ComboCard({ combo, modelCaps = {}, activeProviders = [],
                   <span className="text-text-subtle">·</span>
                   <a href="/dashboard/swarm" className="text-primary hover:underline">Telemetry →</a>
                 </div>
+                {/* Auto-scale toggle */}
+                <div className="flex items-center gap-3 mt-1">
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={strategy.autoScale?.enabled === true}
+                      onChange={(e) => onSetStrategy({ autoScale: { ...(strategy.autoScale || {}), enabled: e.target.checked } })}
+                      className="rounded border-border accent-primary"
+                    />
+                    <span className="text-[10px] text-text-muted">Auto-scale</span>
+                  </label>
+                  {strategy.autoScale?.enabled && (
+                    <>
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] text-text-muted">Min:</span>
+                        <input
+                          type="number"
+                          min={1}
+                          max={strategy.autoScale?.maxWorkers || 8}
+                          value={strategy.autoScale?.minWorkers ?? 1}
+                          onChange={(e) => onSetStrategy({ autoScale: { ...(strategy.autoScale || {}), minWorkers: Number(e.target.value) || 1 } })}
+                          className="w-10 rounded border border-border bg-background px-1 py-0.5 text-[10px] font-mono text-center focus:outline-none focus:border-primary"
+                        />
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] text-text-muted">Max:</span>
+                        <input
+                          type="number"
+                          min={1}
+                          max={8}
+                          value={strategy.autoScale?.maxWorkers ?? models.length}
+                          onChange={(e) => onSetStrategy({ autoScale: { ...(strategy.autoScale || {}), maxWorkers: Number(e.target.value) || 1 } })}
+                          className="w-10 rounded border border-border bg-background px-1 py-0.5 text-[10px] font-mono text-center focus:outline-none focus:border-primary"
+                        />
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
           )}
+
+          {/* Thinking config */}
+          <div className="mt-3 border-t border-border-subtle pt-3">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[10px] uppercase tracking-wide text-text-muted">Thinking</p>
+              <button
+                onClick={() => setExpandedRoles(expandedRoles.length > 0 ? [] : (isFusion ? FUSION_ROLES : isSwarm ? SWARM_ROLES : []).map(r => r.key))}
+                className="text-[10px] text-primary hover:underline"
+              >
+                {expandedRoles.length > 0 ? "Hide roles" : `Role overrides${isThinkingActive ? " (" + Object.keys(thinking.roles || {}).length + ")" : ""}`}
+              </button>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Mode selector */}
+              <div className="flex items-center gap-1.5">
+                <label className="text-[10px] text-text-muted">Mode:</label>
+                <select
+                  value={thinkingType}
+                  onChange={(e) => setThinking({ type: e.target.value })}
+                  className="rounded border border-border bg-background px-1.5 py-0.5 text-[11px] font-mono focus:outline-none focus:border-primary"
+                >
+                  {THINKING_TYPE_OPTIONS.map(o => {
+                    const supported = o.value === "auto" || o.value === "off"
+                      || (o.value === "effort" && hasEffort)
+                      || (o.value === "extended" && hasExtended);
+                    return (
+                      <option key={o.value} value={o.value} disabled={!supported} className={!supported ? "text-text-muted" : ""}>
+                        {o.label}{!supported ? " (not supported)" : ""}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+
+              {/* Warning: current mode not supported by some models */}
+              {unsupportedForCurrent.length > 0 && (
+                <div className="flex items-center gap-1 text-amber-600 dark:text-amber-400">
+                  <span className="material-symbols-outlined text-[12px]">warning</span>
+                  <span className="text-[10px]">
+                    {thinkingType} not supported by {unsupportedForCurrent.map(m => m.model.split("/").pop()).join(", ")}
+                  </span>
+                </div>
+              )}
+              {unresolvableModels.length > 0 && thinkingType !== "auto" && thinkingType !== "off" && (
+                <div className="flex items-center gap-1 text-amber-600 dark:text-amber-400">
+                  <span className="material-symbols-outlined text-[12px]">warning</span>
+                  <span className="text-[10px]">
+                    Thinking capability unknown for {unresolvableModels.map(m => m.model.split("/").pop()).join(", ")}
+                  </span>
+                </div>
+              )}
+
+              {/* Effort selector (for effort mode) */}
+              {thinkingType === "effort" && (
+                <div className="flex items-center gap-1.5">
+                  <label className="text-[10px] text-text-muted">Effort:</label>
+                  <select
+                    value={thinking.effort || "high"}
+                    onChange={(e) => setThinking({ effort: e.target.value })}
+                    className="rounded border border-border bg-background px-1.5 py-0.5 text-[11px] font-mono focus:outline-none focus:border-primary"
+                  >
+                    {THINKING_EFFORT_OPTIONS.map(o => {
+                      const supported = o.value !== "max" || hasMaxEffort;
+                      return (
+                        <option key={o.value} value={o.value} disabled={!supported} className={!supported ? "text-text-muted" : ""}>
+                          {o.label}{!supported ? " (not supported)" : ""}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+              )}
+
+              {/* Budget tokens (for extended mode) */}
+              {thinkingType === "extended" && (
+                <div className="flex items-center gap-1.5">
+                  <label className="text-[10px] text-text-muted">Budget:</label>
+                  <input
+                    type="number"
+                    min={1024}
+                    max={128000}
+                    step={1024}
+                    value={thinking.budgetTokens || 4096}
+                    onChange={(e) => setThinking({ budgetTokens: Number(e.target.value) || 4096 })}
+                    className="w-20 rounded border border-border bg-background px-1.5 py-0.5 text-[11px] font-mono focus:outline-none focus:border-primary"
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Role-level overrides */}
+            {expandedRoles.length > 0 && isThinkingActive && (
+              <div className="mt-2 flex flex-col gap-1.5 pl-1">
+                <p className="text-[10px] text-text-muted">Per-role overrides (leave as parent to inherit global)</p>
+                {(isFusion ? FUSION_ROLES : isSwarm ? SWARM_ROLES : []).map(role => {
+                  const r = roleThinking(role.key);
+                  return (
+                    <div key={role.key} className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-[13px] text-text-muted">{role.icon}</span>
+                      <span className="text-[11px] font-medium text-text-muted w-12">{role.label}</span>
+                      <select
+                        value={r?.type || "inherit"}
+                        onChange={(e) => setRoleThinking(role.key, e.target.value === "inherit" ? null : { type: e.target.value })}
+                        className="rounded border border-border bg-background px-1 py-0.5 text-[10px] font-mono focus:outline-none focus:border-primary"
+                      >
+                        <option value="inherit">Inherit</option>
+                        <option value="off">Off</option>
+                        <option value="effort" disabled={!hasEffort} className={!hasEffort ? "text-text-muted" : ""}>Effort{!hasEffort ? " (not supported)" : ""}</option>
+                        <option value="extended" disabled={!hasExtended} className={!hasExtended ? "text-text-muted" : ""}>Extended{!hasExtended ? " (not supported)" : ""}</option>
+                      </select>
+                      {r?.type === "effort" && (
+                        <select
+                          value={r.effort || "high"}
+                          onChange={(e) => setRoleThinking(role.key, { type: "effort", effort: e.target.value })}
+                          className="rounded border border-border bg-background px-1 py-0.5 text-[10px] font-mono focus:outline-none focus:border-primary"
+                        >
+                          {THINKING_EFFORT_OPTIONS.map(o => {
+                            const supported = o.value !== "max" || hasMaxEffort;
+                            return (
+                              <option key={o.value} value={o.value} disabled={!supported} className={!supported ? "text-text-muted" : ""}>
+                                {o.label}{!supported ? " (not supported)" : ""}
+                              </option>
+                            );
+                          })}
+                        </select>
+                      )}
+                      {r?.type === "extended" && (
+                        <input
+                          type="number"
+                          min={1024}
+                          max={128000}
+                          step={1024}
+                          value={r.budgetTokens || 4096}
+                          onChange={(e) => setRoleThinking(role.key, { type: "extended", budgetTokens: Number(e.target.value) || 4096 })}
+                          className="w-16 rounded border border-border bg-background px-1 py-0.5 text-[10px] font-mono focus:outline-none focus:border-primary"
+                        />
+                      )}
+                      {r && (
+                        <button onClick={() => setRoleThinking(role.key, null)} className="p-0.5 rounded text-text-muted hover:text-red-500" title="Reset to inherit">
+                          <span className="material-symbols-outlined text-[12px]">close</span>
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
 
           {/* Strategy description */}
           <div className="text-xs text-text-muted bg-black/[0.02] dark:bg-white/[0.02] rounded px-2 py-1.5">

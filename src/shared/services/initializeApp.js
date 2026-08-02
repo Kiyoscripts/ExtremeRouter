@@ -17,6 +17,7 @@ import { getMitmStatus, startMitm, loadEncryptedPassword, initDbHooks, restoreTo
 import { startQuotaAutoPing } from "@/shared/services/quotaAutoPing";
 import { initAlertService } from "@/shared/services/alertService";
 import { syncToJson as syncMitmAliasCache } from "@/lib/mitmAliasCache";
+import { reactivateExpiredKimchiAccounts } from "@/sse/services/kimchiQuotaReactivation";
 
 // Inject correct paths and DB hooks into manager.js (CJS) from ESM context
 (function bootstrapMitm() {
@@ -60,7 +61,30 @@ const g = global.__appSingleton ??= {
   mitmStartInProgress: false,
   tunnelAutoResumed: false,
   tailscaleAutoResumed: false,
+  kimchiReactivationStarted: false,
 };
+
+// ─── Kimchi quota auto-reactivation ──────────────────────────────────────
+// Kimchi Community-tier quota resets at 00:00 UTC. Accounts deactivated with
+// testStatus="quota_exhausted" are re-activated once their cooldown passes.
+// Runs at startup + every 30 min (unref'd so it never keeps the process alive).
+const KIMCHI_REACTIVATION_INTERVAL_MS = 30 * 60 * 1000;
+
+function startKimchiQuotaReactivation() {
+  if (g.kimchiReactivationStarted) return;
+  g.kimchiReactivationStarted = true;
+
+  const sweep = () => {
+    reactivateExpiredKimchiAccounts().catch((e) => {
+      console.log("[InitApp] Kimchi quota reactivation sweep failed:", e?.message || e);
+    });
+  };
+
+  // Initial sweep at startup (catches accounts whose reset passed while offline).
+  sweep();
+  const interval = setInterval(sweep, KIMCHI_REACTIVATION_INTERVAL_MS);
+  if (interval.unref) interval.unref();
+}
 
 export async function initializeApp() {
   try {
@@ -108,6 +132,7 @@ export async function initializeApp() {
     autoStartMitm();
     startQuotaAutoPing();
     initAlertService();
+    startKimchiQuotaReactivation();
   } catch (error) {
     console.error("[InitApp] Error:", error);
   }

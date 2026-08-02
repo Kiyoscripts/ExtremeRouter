@@ -150,6 +150,9 @@ import p148 from "./agnes-web.js";
 import p149 from "./agnes-api.js";
 import p150 from "./qwen2api.js";
 import p151 from "./stepfun.js";
+import p152 from "./deepinfra.js";
+import p153 from "./codestral.js";
+import p154 from "./databricks.js";
 
 export default [
   p0,
@@ -303,4 +306,7 @@ export default [
   p149,
   p150,
   p151,
+  p152,
+  p153,
+  p154,
 ];

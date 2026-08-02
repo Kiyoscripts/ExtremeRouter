@@ -27,6 +27,7 @@ export default function CombosPageInner() {
   const [activeProviders, setActiveProviders] = useState([]);
   const [comboStrategies, setComboStrategies] = useState({});
   const [modelCaps, setModelCaps] = useState({});
+  const [modelIndex, setModelIndex] = useState({});
   const [confirmState, setConfirmState] = useState(null);
   const { copied, copy } = useCopyToClipboard();
 
@@ -47,8 +48,20 @@ export default function CombosPageInner() {
       if (modelsRes.ok) {
         const md = await modelsRes.json();
         const map = {};
-        for (const m of md.models || []) if (m.caps) map[m.fullModel] = m.caps;
+        const idx = {};
+        for (const m of md.models || []) {
+          if (m.caps) map[m.fullModel] = m.caps;
+          // Build model-name → [provider ids] index so templates can resolve a
+          // model to ANY connected provider that carries it (not just the
+          // template's preferred provider).
+          const name = (m.fullModel || "").split("/").slice(1).join("/");
+          if (name && m.provider) {
+            if (!idx[name]) idx[name] = [];
+            if (!idx[name].includes(m.provider)) idx[name].push(m.provider);
+          }
+        }
         setModelCaps(map);
+        setModelIndex(idx);
       }
       setComboStrategies(settingsData.comboStrategies || {});
     } catch (error) {
@@ -124,16 +137,24 @@ export default function CombosPageInner() {
       const ROLE_FIELDS = {
         fusion: ["judgeModel", "fusionTuning"],
         swarm: ["managerModel", "staffModel", "auditModel", "workerCount", "swarmTuning", "enableTelemetry"],
+        cascade: ["cascade"],
         fallback: [],
         "round-robin": [],
       };
-      const keep = new Set(["fallbackStrategy", ...(ROLE_FIELDS[nextStrat] || [])]);
+      // thinking + autoScale apply to EVERY strategy (fallback included) — always keep them.
+      const keep = new Set(["fallbackStrategy", "thinking", "autoScale", ...(ROLE_FIELDS[nextStrat] || [])]);
       const next = {};
       for (const [k, v] of Object.entries(merged)) {
         if (keep.has(k)) next[k] = v;
       }
 
-      const isDelete = !next.fallbackStrategy || next.fallbackStrategy === "fallback";
+      // Only delete the whole entry when a previously-configured combo is reverted
+      // to plain fallback with NO extra config. A fallback combo that carries
+      // thinking/autoScale (e.g. Penny-Pincher template) must keep its config —
+      // previously ANY edit to a fallback combo wiped thinking entirely.
+      const hadConfig = Object.keys(current).some((k) => k !== "fallbackStrategy" && current[k] != null && current[k] !== "");
+      const hasExtraConfig = Object.keys(next).some((k) => k !== "fallbackStrategy");
+      const isDelete = next.fallbackStrategy === "fallback" && hadConfig && !hasExtraConfig;
       // null is the backend's delete-signal (see settingsRepo deep-merge).
       const payload = { comboStrategies: { [comboName]: isDelete ? null : next } };
 
@@ -200,7 +221,7 @@ export default function CombosPageInner() {
       )}
 
       {activeTab === "templates" && (
-        <ComboTemplatesTab combos={combos} connections={activeProviders} onApply={fetchData} />
+        <ComboTemplatesTab combos={combos} connections={activeProviders} modelIndex={modelIndex} onApply={fetchData} />
       )}
 
       {/* Create Modal */}

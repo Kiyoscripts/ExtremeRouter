@@ -16,6 +16,7 @@ export default defineConfig({
       "**/node_modules/**",
       "**/.claude/**",
       "**/dist/**",
+      "**/.next/**",
       // External-provider suites require credentials and network access. Keep the
       // default suite deterministic so it can safely gate release publishing.
       "**/*.real.test.js",

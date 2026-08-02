@@ -8,6 +8,7 @@ export const STRATEGY_OPTIONS = [
   { value: "round-robin", label: "Round Robin", desc: "Rotate models across requests", icon: "cached" },
   { value: "fusion", label: "Fusion", desc: "Parallel panel + judge synthesis", icon: "hub" },
   { value: "swarm", label: "Swarm", desc: "Hierarchical Manager→Staff→Workers", icon: "account_tree" },
+  { value: "cascade", label: "Cascade", desc: "Escalate cheap→capable on low confidence", icon: "trending_up" },
 ];
 
 // Strategy → visual indicator mapping (Material Symbols icon + color).
@@ -16,6 +17,7 @@ export const STRATEGY_META = {
   "round-robin": { icon: "cached",      color: "#10B981", badge: "success" },
   fusion:      { icon: "hub",           color: "#8B5CF6", badge: "primary" },
   swarm:       { icon: "account_tree",  color: "#F59E0B", badge: "warning" },
+  cascade:     { icon: "trending_up",   color: "#06B6D4", badge: "cyan" },
 };
 
 export function getStrategyMeta(strategy) {
@@ -39,6 +41,7 @@ export const FILTER_OPTIONS = [
   { value: "round-robin", label: "Round Robin" },
   { value: "fusion", label: "Fusion" },
   { value: "swarm", label: "Swarm" },
+  { value: "cascade", label: "Cascade" },
 ];
 
 // Sort options for combo list.
@@ -95,13 +98,13 @@ export function getUniqueModels(combos) {
 
 // Compute strategy distribution for donut/bar chart.
 export function getStrategyDistribution(combos, comboStrategies) {
-  const dist = { fallback: 0, "round-robin": 0, fusion: 0, swarm: 0 };
-  // L1 FIX: only the 4 known strategies get buckets. A typo'd/unknown value
+  const dist = { fallback: 0, "round-robin": 0, fusion: 0, swarm: 0, cascade: 0 };
+  // L1 FIX: only the known strategies get buckets. A typo'd/unknown value
   // (e.g. "FUSION" uppercase persisted before M2 normalization) previously
   // created a stray key that ComboOverview rendered as "Fallback" via the
   // getStrategyMeta fallback — masking the misconfiguration. Now unknown
   // values are bucketed under fallback explicitly.
-  const KNOWN = new Set(["fallback", "round-robin", "fusion", "swarm"]);
+  const KNOWN = new Set(["fallback", "round-robin", "fusion", "swarm", "cascade"]);
   for (const c of combos) {
     const raw = comboStrategies[c.name]?.fallbackStrategy || "fallback";
     const s = KNOWN.has(raw) ? raw : "fallback";

@@ -10,29 +10,31 @@ import {
 import { cacheClaudeHeaders } from "open-sse/utils/claudeHeaderCache.js";
 import { readBodyWithLimit } from "../utils/bodyLimiter.js";
 import { checkRateLimit, evictExpiredBuckets } from "../utils/rateLimiter.js";
-import { getSettings } from "@/lib/localDb";
+import { getSettings, getApiKeyByKey, getComboByName } from "@/lib/localDb";
 import { getModelInfo, getComboModels } from "../services/model.js";
 import { handleChatCore } from "open-sse/handlers/chatCore.js";
 import { DEFAULT_HEADROOM_URL } from "@/lib/headroom/detect";
 import { getPxpipeDir } from "@/lib/pxpipe/manager.js";
 import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
-import { handleComboChat, handleFusionChat, handleSwarmChat } from "open-sse/services/combo.js";
+import { handleComboChat, handleFusionChat, handleSwarmChat, handleCascadeChat } from "open-sse/services/combo.js";
 import { handleBypassRequest } from "open-sse/utils/bypassHandler.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import { detectFormatByEndpoint } from "open-sse/translator/formats.js";
 import * as log from "../utils/logger.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { getProjectIdForConnection } from "open-sse/services/projectId.js";
-import { recordBreakerSuccess, recordBreakerFailure, isRetryableFailure, releaseBreakerProbe } from "open-sse/services/circuitBreaker.js";
+import { recordBreakerSuccess, recordBreakerFailure, isRetryableFailure, releaseBreakerProbe, breakerKey } from "open-sse/services/circuitBreaker.js";
 import { recordHealthSample } from "open-sse/services/healthMonitor.js";
-import { getApiKeyByKey } from "@/lib/localDb";
+import { buildComboExecutionGraph, authorizeComboExecution } from "../services/comboExecutionPolicy.js";
+import { acquireComboAdmission, wrapResponseWithAdmission } from "../services/comboAdmission.js";
+import { createComboBudget } from "open-sse/services/comboBudget.js";
 
 // M2 FIX: normalize a combo strategy string to a known value. Accepts case
 // variants + surrounding whitespace ("FUSION", "Round-Robin ", " Swarm ") and
 // maps unknown values to "fallback" so a typo or client-injected junk never
 // silently mis-dispatches. The previous exact-case compares meant "FUSION"
 // fell through to handleComboChat as plain fallback with no indication.
-const KNOWN_STRATEGIES = new Set(["fallback", "round-robin", "fusion", "swarm"]);
+const KNOWN_STRATEGIES = new Set(["fallback", "round-robin", "fusion", "swarm", "cascade"]);
 function normalizeStrategy(raw) {
   if (typeof raw !== "string") return "fallback";
   const s = raw.trim().toLowerCase();
@@ -134,107 +136,196 @@ export async function handleChat(request, clientRawRequest = null) {
     return errorResponse(HTTP_STATUS.BAD_REQUEST, "Missing model");
   }
 
-  // Per-Key Model Access Control: if the resolved API key has an allowedModels
-  // list, reject requests to models not in the list.
-  // H2 FIX: Enforce ACL whenever an API key is present, regardless of
-  // requireApiKey setting. Previously this was gated on requireApiKey=true,
-  // meaning local mode (requireApiKey=false) had no model ACL at all.
-  if (apiKey) {
-    try {
-      const keyObj = await getApiKeyByKey(apiKey);
-      if (keyObj && Array.isArray(keyObj.allowedModels) && keyObj.allowedModels.length > 0) {
-        const allowed = keyObj.allowedModels;
-        const requestedModel = modelStr.includes("/") ? modelStr : modelStr;
-        const isAllowed = allowed.some((m) => {
-          if (m === requestedModel) return true;
-          // Allow prefix match for combo names (e.g. "glm/" matches "glm/glm-5")
-          if (m.endsWith("/") && requestedModel.startsWith(m)) return true;
-          return false;
-        });
-        if (!isAllowed) {
-          log.warn("AUTH", `Model "${modelStr}" not allowed for key "${keyObj.name || keyObj.id}"`);
-          return errorResponse(HTTP_STATUS.FORBIDDEN, `Model "${modelStr}" is not allowed for this API key`);
-        }
-      }
-    } catch (aclErr) {
-      log.warn("AUTH", `ACL check error: ${aclErr?.message || aclErr}`);
-    }
-  }
+  let keyObj = null;
+  if (apiKey) keyObj = await getApiKeyByKey(apiKey).catch((error) => {
+    log.warn("AUTH", `ACL lookup error: ${error?.message || error}`);
+    return null;
+  });
 
-  // Bypass naming/warmup requests before combo rotation to avoid wasting rotation slots
   const userAgent = request?.headers?.get("user-agent") || "";
   const bypassResponse = handleBypassRequest(body, modelStr, userAgent, !!settings.ccFilterNaming);
   if (bypassResponse) return bypassResponse.response || bypassResponse;
 
-  // Check if model is a combo (has multiple models with fallback)
-  const comboModels = await getComboModels(modelStr);
-  if (comboModels) {
-    // Check for combo-specific strategy first, fallback to global
-    const comboStrategies = settings.comboStrategies || {};
-    const comboSpecificStrategy = comboStrategies[modelStr]?.fallbackStrategy;
-    const comboStrategy = normalizeStrategy(comboSpecificStrategy || settings.comboStrategy || "fallback");
+  const combo = !modelStr.includes("/") ? await getComboByName(modelStr) : null;
+  if (combo?.models?.length) {
+    try {
+      const graph = await buildComboExecutionGraph(combo, settings.comboStrategies?.[modelStr] || { fallbackStrategy: settings.comboStrategy });
+      const authz = authorizeComboExecution(keyObj, graph);
+      if (!authz.allowed) {
+        log.warn("AUTH", `Combo "${modelStr}" denied expanded models: ${authz.denied.join(", ")}`);
+        return errorResponse(HTTP_STATUS.FORBIDDEN, `Combo execution includes models not allowed for this API key: ${authz.denied.join(", ")}`);
+      }
 
-    if (comboStrategy === "fusion") {
-      log.info("CHAT", `Combo "${modelStr}" with ${comboModels.length} models (strategy: fusion)`);
-      return handleFusionChat({
-        body,
-        models: comboModels,
-        handleSingleModel: (b, m, isPanel) => {
-          let cleanRawReq = clientRawRequest;
-          if (isPanel && clientRawRequest) {
-            const { tools, tool_choice, ...cleanBody } = clientRawRequest.body || {};
-            cleanRawReq = { ...clientRawRequest, body: cleanBody };
-          }
-          return handleSingleModelChat(b, m, cleanRawReq, request, apiKey, { skipBreaker: isPanel });
-        },
-        log,
-        comboName: modelStr,
-        judgeModel: comboStrategies[modelStr]?.judgeModel,
-        tuning: comboStrategies[modelStr]?.fusionTuning,
-      });
+      // One token was charged before resolution. Charge the remaining expansion
+      // cost atomically before any provider call.
+      if (graph.logicalCalls > 1) {
+        const expansionLimit = checkRateLimit(rateLimitKey, undefined, undefined, graph.logicalCalls - 1);
+        if (!expansionLimit.allowed) return errorResponse(HTTP_STATUS.TOO_MANY_REQUESTS, "Combo rate limit exceeded");
+      }
+
+      const budget = createComboBudget({ body, config: graph.config, leaves: graph.leaves, logicalCalls: graph.logicalCalls });
+      if (!budget.ok) return errorResponse(HTTP_STATUS.BAD_REQUEST, `Combo budget rejected: ${budget.code}`);
+
+      const lease = acquireComboAdmission(keyObj?.id || rateLimitKey);
+      if (!lease.ok) {
+        return new Response(JSON.stringify({ error: { message: "Combo capacity unavailable", code: lease.code } }), {
+          status: lease.status,
+          headers: { "Content-Type": "application/json", "Retry-After": String(lease.retryAfter) },
+        });
+      }
+      const runController = new AbortController();
+      const abort = () => runController.abort(request.signal?.reason || new Error("client disconnected"));
+      if (request.signal?.aborted) abort(); else request.signal?.addEventListener("abort", abort, { once: true });
+      try {
+        const response = await dispatchResolvedCombo({ body, graph, clientRawRequest, request, apiKey, settings, signal: runController.signal, budget, principalId: keyObj?.id || "local" });
+        return wrapResponseWithAdmission(response, lease);
+      } catch (error) {
+        lease.release();
+        throw error;
+      } finally {
+        request.signal?.removeEventListener("abort", abort);
+      }
+    } catch (error) {
+      log.warn("COMBO", `Combo resolution failed: ${error?.message || error}`);
+      return errorResponse(HTTP_STATUS.BAD_REQUEST, error?.message || "Invalid combo configuration");
     }
+  }
 
-    const comboStickyLimit = settings.comboStickyRoundRobinLimit;
-    if (comboStrategy === "swarm") {
-      log.info("CHAT", `Combo "${modelStr}" with ${comboModels.length} models (strategy: swarm)`);
-      const swarmCfg = comboStrategies[modelStr] || {};
-      return handleSwarmChat({
-        body,
-        models: comboModels,
-        handleSingleModel: (b, m, isPanel) => {
-          let cleanRawReq = clientRawRequest;
-          if (isPanel && clientRawRequest) {
-            const { tools, tool_choice, ...cleanBody } = clientRawRequest.body || {};
-            cleanRawReq = { ...clientRawRequest, body: cleanBody };
-          }
-          return handleSingleModelChat(b, m, cleanRawReq, request, apiKey, { skipBreaker: isPanel });
-        },
-        log,
-        comboName: modelStr,
-        managerModel: swarmCfg.managerModel,
-        staffModel: swarmCfg.staffModel,
-        auditModel: swarmCfg.auditModel,
-        workerCount: swarmCfg.workerCount,
-        swarmTuning: swarmCfg.swarmTuning,
-        telemetry: swarmCfg.enableTelemetry !== false,
-      });
+  if (keyObj && Array.isArray(keyObj.allowedModels) && keyObj.allowedModels.length > 0) {
+    const allowed = keyObj.allowedModels.some((m) => m === modelStr || (m.endsWith("/") && modelStr.startsWith(m)));
+    if (!allowed) return errorResponse(HTTP_STATUS.FORBIDDEN, `Model "${modelStr}" is not allowed for this API key`);
+  }
+  return handleSingleModelChat(body, modelStr, clientRawRequest, request, apiKey);
+}
+
+/**
+ * Dispatch a resolved combo execution graph to the appropriate strategy handler.
+ *
+ * Consolidates the previously-duplicated fallback/fusion/swarm dispatch logic
+ * (CS-19) into one place. The graph has already been resolved and authorized
+ * by buildComboExecutionGraph + authorizeComboExecution, so we only map
+ * config → handler and build the handleSingleModel closure.
+ *
+ * @param {Object} opts
+ * @param {Object} opts.body - request body
+ * @param {Object} opts.graph - resolved execution graph from buildComboExecutionGraph
+ * @param {Object} opts.clientRawRequest - raw request for logging
+ * @param {Object} opts.request - original Next.js request
+ * @param {string} opts.apiKey - API key
+ * @param {Object} opts.settings - settings
+ * @param {AbortSignal} opts.signal - run-level abort signal (CS-02)
+ * @param {Object} opts.budget - combo budget from createComboBudget
+ * @param {string} opts.principalId - principal ID for telemetry
+ * @returns {Promise<Response>}
+ */
+
+/**
+ * Resolve effective thinking config for a combo role.
+ * Priority: role override > global combo > null (fallback to provider-level).
+ */
+function resolveThinkingForComboRole(comboThinking, role) {
+  if (!comboThinking || comboThinking.type === "auto" || comboThinking.type === "off") return null;
+  if (role && comboThinking.roles?.[role]) {
+    const roleCfg = comboThinking.roles[role];
+    if (roleCfg.type === "inherit" || roleCfg.type === undefined) {
+      return { ...comboThinking, ...roleCfg, roles: undefined };
     }
+    return roleCfg;
+  }
+  return comboThinking;
+}
 
-    log.info("CHAT", `Combo "${modelStr}" with ${comboModels.length} models (strategy: ${comboStrategy}, sticky: ${comboStickyLimit})`);
-    return handleComboChat({
+async function dispatchResolvedCombo({ body, graph, clientRawRequest, request, apiKey, settings, signal, budget, principalId }) {
+  const { comboName, config, members } = graph;
+  const strategy = config.fallbackStrategy;
+  const comboThinking = config?.thinking;
+
+  // Build the handleSingleModel closure. Panel calls (fusion/swarm fan-out)
+  // strip tools and use skipBreaker to isolate breaker state from internal calls.
+  // The signal is threaded through so the run-level AbortController can cancel
+  // in-flight provider calls when quorum grace expires, hard timeout fires, or
+  // the client disconnects (CS-02).
+  const handleSingleModel = (b, m, callOpts = {}) => {
+    // Normalize: support both boolean (legacy swarm/combo call style) and
+    // object (new abortable-task call style) callOpts.
+    const opts = typeof callOpts === "boolean" ? { isPanel: callOpts } : callOpts;
+    const effectiveThinking = resolveThinkingForComboRole(comboThinking, opts.role);
+    let cleanRawReq = clientRawRequest;
+    if (opts.isPanel && clientRawRequest) {
+      const { tools, tool_choice, ...cleanBody } = clientRawRequest.body || {};
+      cleanRawReq = { ...clientRawRequest, body: cleanBody };
+    }
+    return handleSingleModelChat(b, m, cleanRawReq, request, apiKey, {
+      skipBreaker: opts.isPanel,
+      signal: opts.signal,
+      trafficClass: opts.trafficClass || (opts.isPanel ? "panel" : "user"),
+      thinking: effectiveThinking,
+    });
+  };
+
+  if (strategy === "fusion") {
+    log.info("CHAT", `Combo "${comboName}" with ${members.length} models (strategy: fusion)`);
+    return handleFusionChat({
       body,
-      models: comboModels,
-      handleSingleModel: (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey),
+      models: members,
+      handleSingleModel,
       log,
-      comboName: modelStr,
-      comboStrategy,
-      comboStickyLimit,
-      breakerSettings: settings,
+      comboName,
+      judgeModel: config.judgeModel,
+      tuning: config.fusionTuning,
+      signal,
+      runBudget: budget,
     });
   }
 
-  // Single model request
-  return handleSingleModelChat(body, modelStr, clientRawRequest, request, apiKey);
+  if (strategy === "swarm") {
+    log.info("CHAT", `Combo "${comboName}" with ${members.length} models (strategy: swarm)`);
+    return handleSwarmChat({
+      body,
+      models: members,
+      handleSingleModel,
+      log,
+      comboName,
+      managerModel: config.managerModel,
+      staffModel: config.staffModel,
+      auditModel: config.auditModel,
+      workerCount: config.workerCount,
+      swarmTuning: config.swarmTuning,
+      telemetry: config.enableTelemetry,
+      signal,
+      runBudget: budget,
+      principalId,
+      autoScale: config.autoScale,
+    });
+  }
+
+  if (strategy === "cascade") {
+    log.info("CHAT", `Combo "${comboName}" with ${members.length} models (strategy: cascade)`);
+    return handleCascadeChat({
+      body,
+      models: members,
+      handleSingleModel,
+      log,
+      comboName,
+      tuning: config.cascade,
+      signal,
+    });
+  }
+
+  // fallback / round-robin
+  log.info("CHAT", `Combo "${comboName}" with ${members.length} models (strategy: ${strategy})`);
+  return handleComboChat({
+    body,
+    models: members,
+    handleSingleModel,
+    log,
+    comboName,
+    comboStrategy: strategy,
+    comboStickyLimit: settings.comboStickyRoundRobinLimit,
+    breakerSettings: settings,
+    signal,
+    runBudget: budget,
+  });
 }
 
 /**
@@ -332,6 +423,13 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
   let lastError = null;
   let lastStatus = null;
 
+  // Fetch settings once before the retry loop. The early-exit branches below
+  // (allRateLimited / no-credentials / exhausted-accounts) call recordHealthSample
+  // which needs chatSettings, so it must exist before the loop body executes —
+  // otherwise it's a TDZ ReferenceError on the first iteration. Fetching once per
+  // request is also cheaper than re-reading the DB on every fallback attempt.
+  const chatSettings = await getSettings();
+
   while (true) {
     const credentials = await getProviderCredentials(provider, excludeConnectionIds, model);
 
@@ -342,7 +440,9 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
         const status = lastStatus || Number(credentials.lastErrorCode) || HTTP_STATUS.SERVICE_UNAVAILABLE;
         log.warn("CHAT", `[${provider}/${model}] ${errorMsg} (${credentials.retryAfterHuman})`);
         // C3 fix: record failure sample so health monitor sees this.
-        recordHealthSample(provider, { success: false, latencyMs: Date.now() - attemptStart, status }, chatSettings);
+        // No model attempt ran on this path (every account is rate-limited), so
+        // model latency is 0 — consistent with the other early-exit samples below.
+        recordHealthSample(provider, { success: false, latencyMs: 0, status }, chatSettings);
         return unavailableResponse(status, `[${provider}/${model}] ${errorMsg}`, credentials.retryAfter, credentials.retryAfterHuman);
       }
       if (excludeConnectionIds.size === 0) {
@@ -373,10 +473,12 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
     }
 
     // Use shared chatCore
-    const chatSettings = await getSettings();
-    const providerThinking = (chatSettings.providerThinking || {})[provider] || null;
+    const providerThinking = opts.thinking || (chatSettings.providerThinking || {})[provider] || null;
     const pxpipeDir = getPxpipeDir();
     const attemptStart = Date.now();
+    // Proxy-aware breaker key: isolate breaker state per (provider, proxy) so
+    // one dead proxy doesn't trip the breaker for other proxies/direct traffic.
+    const breakerKeyVal = breakerKey(provider, refreshedCredentials?.providerSpecificData || {});
     const result = await handleChatCore({
       body: { ...body, model: `${provider}/${model}` },
       modelInfo: { provider, model },
@@ -404,6 +506,10 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       providerThinking,
       // Detect source format by endpoint + body
       sourceFormatOverride: request?.url ? detectFormatByEndpoint(new URL(request.url).pathname, body) : null,
+      // CS-02: thread the run-level abort signal so handleChatCore can cancel
+      // in-flight provider calls when quorum grace expires, hard timeout fires,
+      // or the client disconnects.
+      externalSignal: opts.signal,
       onCredentialsRefreshed: async (newCreds) => {
         await updateProviderCredentials(credentials.connectionId, {
           ...newCreds,
@@ -418,7 +524,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       // Probe-slot leak fix: if handleChatCore throws (abort, network error),
       // release the claimed half-open probe slot so the breaker doesn't get stuck.
       // Skip for panel calls (skipBreaker) — no probe was claimed.
-      if (!opts.skipBreaker) releaseBreakerProbe(provider);
+      if (!opts.skipBreaker) releaseBreakerProbe(provider, breakerKeyVal);
       // C3 fix: record failure sample for thrown exceptions (abort, network error).
       if (!opts.skipBreaker) {
         recordHealthSample(provider, { success: false, latencyMs: Date.now() - attemptStart, status: 0 }, chatSettings);
@@ -433,7 +539,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       // flaky panel model trip the breaker and block single-model requests
       // to the same provider. skipBreaker isolates panel outcomes so only the
       // final user-facing call (judge/synthesis/direct) affects breaker state.
-      if (!opts.skipBreaker) recordBreakerSuccess(provider, chatSettings);
+      if (!opts.skipBreaker) recordBreakerSuccess(provider, chatSettings, breakerKeyVal);
       recordHealthSample(provider, { success: true, latencyMs }, chatSettings);
       return result.response;
     }
@@ -448,13 +554,13 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
     const latencyMs = Date.now() - attemptStart;
     recordHealthSample(provider, { success: false, latencyMs, status: result.status }, chatSettings);
     if (isRetryableFailure(result.status) && !opts.skipBreaker) {
-      recordBreakerFailure(provider, result.status, chatSettings);
+      recordBreakerFailure(provider, result.status, chatSettings, breakerKeyVal);
     } else if (!opts.skipBreaker) {
       // Probe-slot leak fix: non-retryable errors (400/401/403) in half-open
       // state neither record failure nor release the probe slot — the breaker
       // would get stuck at capacity until cooldown. Release explicitly so the
       // next request can claim a probe slot.
-      releaseBreakerProbe(provider);
+      releaseBreakerProbe(provider, breakerKeyVal);
     }
 
     if (shouldFallback) {

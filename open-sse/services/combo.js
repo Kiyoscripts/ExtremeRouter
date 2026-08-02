@@ -8,26 +8,13 @@ import { getCapabilitiesForModel } from "../providers/capabilities.js";
 import { extractTextContent } from "../translator/formats/gemini.js";
 import { isBreakerBlocking } from "./circuitBreaker.js";
 import { validateComboRoles } from "./providerCapabilities.js";
-import REGISTRY from "../providers/registry/index.js";
+import { resolveProviderAlias } from "./model.js";
+import { createAbortableTask } from "./abortableTask.js";
+import { appendDirective, buildCoordinatorBody, inferConversationFormat, clampText } from "./comboConversation.js";
 
 // Hard capabilities = input modalities; missing one drops request data (e.g. image
 // stripped). Must be prioritized. Soft (e.g. search) only degrades a feature.
 const HARD_CAPS = new Set(["vision", "pdf", "audioInput", "videoInput"]);
-
-// Alias → provider id map (built once from the registry). Combo model strings
-// use the provider ALIAS as the prefix (e.g. "glm/glm-5", "gh/claude-opus"),
-// but the circuit breaker is keyed by provider ID. This map resolves the prefix
-// so we can ask the breaker about the right provider without crossing the
-// open-sse → src layer boundary.
-const ALIAS_TO_ID = new Map();
-for (const entry of REGISTRY) {
-  if (entry.alias) ALIAS_TO_ID.set(entry.alias, entry.id);
-  if (Array.isArray(entry.aliases)) {
-    for (const a of entry.aliases) ALIAS_TO_ID.set(a, entry.id);
-  }
-  // Also map id → id so a combo model already using the id prefix resolves.
-  ALIAS_TO_ID.set(entry.id, entry.id);
-}
 
 /**
  * Pre-filter a combo's model list: drop models whose provider circuit breaker
@@ -57,7 +44,7 @@ export async function filterBreakerOpenModels(models, breakerSettings) {
   for (const m of models) {
     const slash = typeof m === "string" ? m.indexOf("/") : -1;
     const prefix = slash > 0 ? m.slice(0, slash) : "";
-    const providerId = prefix ? (ALIAS_TO_ID.get(prefix) || prefix) : "";
+    const providerId = prefix ? resolveProviderAlias(prefix) : "";
     if (providerId && isBreakerBlocking(providerId, breakerSettings)) {
       skipped.push(m);
     } else if (providerId) {
@@ -144,7 +131,7 @@ export function reorderByCapabilities(models, required) {
 
   const tierOf = (m) => {
     const slash = typeof m === "string" ? m.indexOf("/") : -1;
-    const provider = slash > 0 ? m.slice(0, slash) : "";
+    const provider = slash > 0 ? resolveProviderAlias(m.slice(0, slash)) : "";
     const model = slash > 0 ? m.slice(slash + 1) : m;
     const caps = getCapabilitiesForModel(provider, model);
     if (!hard.every((c) => caps[c] === true)) return 2;
@@ -311,7 +298,7 @@ export function getComboModelsFromData(modelStr, combosData) {
  * @param {Object} [options.breakerSettings] - Settings (reads circuitBreaker config) for proactive breaker pre-filter
  * @returns {Promise<Response>}
  */
-export async function handleComboChat({ body, models, handleSingleModel, log, comboName, comboStrategy, comboStickyLimit = 1, autoSwitch = true, breakerSettings = null }) {
+export async function handleComboChat({ body, models, handleSingleModel, log, comboName, comboStrategy, comboStickyLimit = 1, autoSwitch = true, breakerSettings = null, signal, runBudget }) {
   // Apply rotation strategy if enabled
   let rotatedModels = getRotatedModels(models, comboName, comboStrategy, comboStickyLimit);
 
@@ -348,9 +335,7 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
     log.info("COMBO", `Trying model ${i + 1}/${rotatedModels.length}: ${modelStr}`);
 
     try {
-      const result = await handleSingleModel(body, modelStr);
-
-      // Success (2xx) - return response
+      const result = await handleSingleModel(body, modelStr, { role: "worker" });
       if (result.ok) {
         log.info("COMBO", `Model ${modelStr} succeeded`);
         return result;
@@ -378,7 +363,10 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
       }
 
       // Check if should fallback to next model
-      const { shouldFallback, cooldownMs } = checkFallbackError(result.status, errorText);
+      const nonRetryableClientError = [400, 405, 406, 413, 415, 422].includes(result.status);
+      const { shouldFallback, cooldownMs } = nonRetryableClientError
+        ? { shouldFallback: false, cooldownMs: 0 }
+        : checkFallbackError(result.status, errorText);
 
       if (!shouldFallback) {
         log.warn("COMBO", `Model ${modelStr} failed (no fallback)`, { status: result.status });
@@ -521,12 +509,15 @@ const FUSION_DEFAULTS = {
   panelHardTimeoutMs: 90000, // absolute cap so one hung model can't stall forever
 };
 
-// Resolve a Response (or {__error}) within ms; the loser keeps running but is ignored.
-// Exported for reuse by the Hierarchical Swarm engine.
-export function withTimeout(promise, ms) {
+// Backward-compatible timeout helper. New orchestration should pass a task
+// factory `(signal) => Promise` so timeout aborts the underlying provider call.
+export function withTimeout(taskOrPromise, ms, parentSignal) {
+  if (typeof taskOrPromise === "function") {
+    return createAbortableTask(taskOrPromise, ms, parentSignal).promise;
+  }
   return new Promise((resolve) => {
     const t = setTimeout(() => resolve({ __timeout: true }), ms);
-    Promise.resolve(promise)
+    Promise.resolve(taskOrPromise)
       .then((v) => { clearTimeout(t); resolve(v); })
       .catch((e) => { clearTimeout(t); resolve({ __error: e }); });
   });
@@ -541,7 +532,7 @@ export function withTimeout(promise, ms) {
  */
 // Quorum-grace parallel collection. Exported for reuse by the Hierarchical Swarm
 // engine (parallel worker fan-out).
-export function collectPanel(calls, { minPanel, stragglerGraceMs, panelHardTimeoutMs }) {
+export function collectPanel(calls, { minPanel, stragglerGraceMs, panelHardTimeoutMs, onFinish }) {
   return new Promise((resolve) => {
     const out = new Array(calls.length);
     let settled = 0;
@@ -553,6 +544,7 @@ export function collectPanel(calls, { minPanel, stragglerGraceMs, panelHardTimeo
       finished = true;
       clearTimeout(hardTimer);
       if (graceTimer) clearTimeout(graceTimer);
+      onFinish?.();
       resolve(out);
     };
     const hardTimer = setTimeout(finish, panelHardTimeoutMs);
@@ -593,7 +585,7 @@ export function collectPanel(calls, { minPanel, stragglerGraceMs, panelHardTimeo
  * @param {Object} [options.tuning] - Override FUSION_DEFAULTS (minPanel, grace, timeout)
  * @returns {Promise<Response>}
  */
-export async function handleFusionChat({ body, models, handleSingleModel, log, comboName, judgeModel, tuning }) {
+export async function handleFusionChat({ body, models, handleSingleModel, log, comboName, judgeModel, tuning, signal, runBudget }) {
   const panel = Array.isArray(models) ? models.filter(Boolean) : [];
   if (panel.length === 0) {
     return new Response(
@@ -604,7 +596,7 @@ export async function handleFusionChat({ body, models, handleSingleModel, log, c
 
   // A single-model fusion has nothing to fuse — just answer directly.
   if (panel.length === 1) {
-    return handleSingleModel(body, panel[0]);
+    return handleSingleModel(body, panel[0], { role: "judge" });
   }
 
   // Capability gate: the Judge role requires tool use + file access. Web cookie
@@ -624,20 +616,21 @@ export async function handleFusionChat({ body, models, handleSingleModel, log, c
   const judge = judgeModel && judgeModel.trim() ? judgeModel.trim() : panel[0];
   log.info("FUSION", `Combo "${comboName}" | panel=${panel.length} [${panel.join(", ")}] | judge=${judge} | quorum=${minPanel}`);
 
-  // 1. Fan out to the panel in parallel: non-streaming, tools stripped (we want prose).
-  const { tools, tool_choice, ...rest } = body;
-  const panelBody = { ...rest, stream: false };
-
-  // Flatten tool turns to prose so panel models keep context without emitting tool_calls.
-  if (Array.isArray(panelBody.messages)) {
-    panelBody.messages = flattenToolHistory(panelBody.messages);
-  } else if (Array.isArray(panelBody.input)) {
-    panelBody.input = flattenToolHistory(panelBody.input);
-  }
-
+  // 1. Fan out to the panel in parallel: non-streaming, tools stripped.
+  const format = inferConversationFormat(body);
+  const panelBody = buildCoordinatorBody(body, format);
+  const tasks = panel.map((m) => createAbortableTask(
+    (childSignal) => handleSingleModel(panelBody, m, { isPanel: true, signal: childSignal, trafficClass: "panel", role: "panel" }),
+    cfg.panelHardTimeoutMs,
+    signal,
+  ));
   const t0 = Date.now();
-  const calls = panel.map((m) => withTimeout(handleSingleModel(panelBody, m, true), cfg.panelHardTimeoutMs));
-  const settled = await collectPanel(calls, { ...cfg, minPanel });
+  const settled = await collectPanel(tasks.map((task) => task.promise), {
+    ...cfg,
+    minPanel,
+    onFinish: () => tasks.forEach((task) => task.abort("fusion panel closed")),
+  });
+  tasks.forEach((task) => task.cleanup());
   log.info("FUSION", `fan-out collected in ${Date.now() - t0}ms`);
 
   // 2. Collect successful answers.
@@ -656,7 +649,9 @@ export async function handleFusionChat({ body, models, handleSingleModel, log, c
       const json = await res.clone().json();
       const text = extractPanelText(json);
       if (text) {
-        answers.push({ model, text, res });
+        const budgeted = runBudget ? runBudget.clampOutput(text) : text;
+        if (!budgeted) { log.warn("FUSION", `Panel ${model} exceeded output budget`); continue; }
+        answers.push({ model, text: budgeted, res });
         log.info("FUSION", `Panel ${model} ok (${text.length} chars)`);
       } else {
         log.warn("FUSION", `Panel ${model} returned empty content`);
@@ -685,16 +680,179 @@ export async function handleFusionChat({ body, models, handleSingleModel, log, c
     const wantsStream = body?.stream === true;
     if (wantsStream) {
       log.info("FUSION", `Only ${answers[0].model} succeeded — re-running with stream:true to honor client SSE request (no fusion)`);
-      return handleSingleModel(body, answers[0].model);
+      return handleSingleModel(body, answers[0].model, { role: "panel", signal, trafficClass: "user" });
     }
     log.info("FUSION", `Only ${answers[0].model} succeeded — returning its response directly (no fusion, no re-run)`);
     return answers[0].res;
   }
 
   // 4. Judge analyzes + writes one final answer (streams to client if requested).
-  const judgeBody = appendUserTurn(body, buildJudgePrompt(answers));
+  const maxJudgeChars = runBudget?.limits?.maxOutputChars || 120000;
+  const judgeBody = appendDirective(body, clampText(buildJudgePrompt(answers), maxJudgeChars), format);
   log.info("FUSION", `Judging ${answers.length} answers with ${judge}`);
-  return handleSingleModel(judgeBody, judge);
+  return handleSingleModel(judgeBody, judge, { role: "judge", signal, trafficClass: "user" });
+}
+
+// ── Cascade ────────────────────────────────────────────────────────────
+//
+// Progressive escalation: try models in order (cheapest → most capable).
+// Each stage asks the model to self-rate its confidence (0-100). If confidence
+// ≥ threshold, return the answer. If below, inject the prior answer as context
+// and escalate to the next (stronger) model. The final stage always returns
+// regardless of confidence — guaranteeing a response.
+//
+// Cost savings: ~80% of simple requests finish at stage 1 (cheap model), so
+// the expensive model is only invoked for genuinely hard tasks.
+//
+// Config (strategyConfig.cascade):
+//   confidenceThreshold: 0-100 (default 70) — escalate below this
+//   confidencePrompt:    suffix appended to ask the model to rate itself
+//   escalatePrompt:     prefix injected when escalating with prior output
+//   maxStages:           1-8 (default 3) — cap iterations
+
+const CASCADE_DEFAULTS = {
+  confidenceThreshold: 70,
+  confidencePrompt: "Rate your confidence in this answer from 0 to 100. End your response with exactly: CONFIDENCE: <number>",
+  escalatePrompt: "A prior model gave the following answer with low confidence. Review it, correct any issues, and provide a better answer.",
+  maxStages: 3,
+};
+
+// Parse "CONFIDENCE: <number>" from the end of the model's text output.
+// Returns -1 when no confidence marker is found (treat as "unknown → escalate").
+function parseConfidence(text) {
+  if (!text || typeof text !== "string") return -1;
+  const match = text.match(/CONFIDENCE:\s*(\d{1,3})\s*$/i);
+  if (!match) return -1;
+  const val = Number.parseInt(match[1], 10);
+  return Number.isFinite(val) && val >= 0 && val <= 100 ? val : -1;
+}
+
+// Strip the confidence marker from the answer so the client never sees it.
+function stripConfidenceMarker(text) {
+  if (!text || typeof text !== "string") return text;
+  return text.replace(/\s*CONFIDENCE:\s*\d{1,3}\s*$/i, "").trim();
+}
+
+/**
+ * Handle a cascade combo: progressive escalation from cheap to capable models.
+ *
+ * @param {Object} options
+ * @param {Object} options.body - request body
+ * @param {string[]} options.models - ordered list of models (cheapest first)
+ * @param {Function} options.handleSingleModel - (body, model, opts) => Response
+ * @param {Object} options.log - logger
+ * @param {string} options.comboName - combo name (logging)
+ * @param {Object} [options.tuning] - override CASCADE_DEFAULTS
+ * @param {AbortSignal} [options.signal] - run-level abort signal
+ * @returns {Promise<Response>}
+ */
+export async function handleCascadeChat({ body, models, handleSingleModel, log, comboName, tuning, signal }) {
+  const panel = Array.isArray(models) ? models.filter(Boolean) : [];
+  if (panel.length === 0) {
+    return new Response(
+      JSON.stringify({ error: { message: "Cascade combo has no models" } }),
+      { status: 400, headers: { "Content-Type": "application/json" } },
+    );
+  }
+
+  const cfg = { ...CASCADE_DEFAULTS, ...(tuning || {}) };
+  const maxStages = Math.min(Math.max(1, cfg.maxStages), panel.length);
+  const format = inferConversationFormat(body);
+
+  // The coordinator body strips tools (cascade stages are plain-text Q&A).
+  const baseBody = buildCoordinatorBody(body, format);
+
+  let priorAnswer = null;
+  let priorModel = null;
+
+  for (let stage = 0; stage < maxStages; stage++) {
+    const model = panel[stage];
+    const isFinal = stage === maxStages - 1;
+
+    // Build the stage body: first stage gets the confidence prompt appended;
+    // escalation stages get the prior answer + escalate prompt + confidence prompt.
+    let stageBody = baseBody;
+    if (priorAnswer != null) {
+      const escalateText = `${cfg.escalatePrompt}\n\n--- Prior Answer (${priorModel}) ---\n${clampText(priorAnswer, 60000)}\n--- End Prior Answer ---\n\n${cfg.confidencePrompt}`;
+      stageBody = appendDirective(stageBody, escalateText, format);
+    } else {
+      stageBody = appendDirective(stageBody, cfg.confidencePrompt, format);
+    }
+
+    log.info("CASCADE", `Stage ${stage + 1}/${maxStages}: ${model}${priorAnswer ? " (escalated)" : ""}`);
+
+    let res;
+    try {
+      res = await handleSingleModel(stageBody, model, { isPanel: true, role: "worker", signal });
+    } catch (err) {
+      if (err?.name === "AbortError") throw err;
+      log.warn("CASCADE", `Stage ${stage + 1} (${model}) threw: ${err?.message || err}`);
+      if (isFinal) {
+        return new Response(
+          JSON.stringify({ error: { message: `Cascade failed at final stage: ${err?.message || "unknown"}` } }),
+          { status: 502, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      priorAnswer = null;
+      priorModel = model;
+      continue;
+    }
+
+    // Handle timeout/error markers from withTimeout-style wrappers.
+    if (res?.__timeout || res?.__error) {
+      log.warn("CASCADE", `Stage ${stage + 1} (${model}) ${res.__timeout ? "timed out" : "errored"}`);
+      if (isFinal) {
+        return new Response(
+          JSON.stringify({ error: { message: `Cascade failed at final stage` } }),
+          { status: 502, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      priorAnswer = null;
+      priorModel = model;
+      continue;
+    }
+
+    if (!res?.ok) {
+      log.warn("CASCADE", `Stage ${stage + 1} (${model}) returned status ${res?.status}`);
+      if (isFinal) return res;
+      priorAnswer = null;
+      priorModel = model;
+      continue;
+    }
+
+    // Final stage always returns — no confidence check needed.
+    if (isFinal) {
+      log.info("CASCADE", `Final stage (${model}) returning`);
+      return res;
+    }
+
+    // Extract text + parse confidence.
+    let text = "";
+    try {
+      const json = await res.clone().json().catch(() => ({}));
+      text = extractPanelText(json);
+    } catch { /* best-effort */ }
+
+    const confidence = parseConfidence(text);
+    log.info("CASCADE", `Stage ${stage + 1} (${model}) confidence=${confidence}`);
+
+    if (confidence >= 0 && confidence >= cfg.confidenceThreshold) {
+      // Confident enough — return. The CONFIDENCE marker is a trailing line
+      // that most clients will ignore; we don't re-serialize the response.
+      log.info("CASCADE", `Stage ${stage + 1} confident (${confidence} ≥ ${cfg.confidenceThreshold}) — returning`);
+      return res;
+    }
+
+    // Below threshold (or unparseable) — escalate with prior answer as context.
+    priorAnswer = stripConfidenceMarker(text) || text;
+    priorModel = model;
+  }
+
+  // Should not reach here (final stage always returns), but guard anyway.
+  return new Response(
+    JSON.stringify({ error: { message: "Cascade exhausted all stages" } }),
+    { status: 502, headers: { "Content-Type": "application/json" } },
+  );
 }
 
 // Re-export the Hierarchical Swarm engine from this barrel so chat.js keeps a

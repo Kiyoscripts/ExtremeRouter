@@ -279,7 +279,7 @@ async function runGatekeeper({ runId, body, managerModel, handleSingleModel, cfg
   const directiveBody = appendUserTurn(gateBody, GATEKEEPER_PROMPT);
 
   try {
-    const res = await withTimeout(handleSingleModel(directiveBody, managerModel, true), cfg.managerTimeoutMs);
+    const res = await withTimeout(handleSingleModel(directiveBody, managerModel, { isPanel: true, role: "gatekeeper" }), cfg.managerTimeoutMs);
     if (res?.__timeout || res?.__error) {
       markStageDone(runId, "gatekeeper", { verdict: "complex" }); // assume complex on failure
       _trackGatekeeperFailure(managerModel, log);
@@ -316,7 +316,7 @@ async function runManagerStrategy({ runId, body, managerModel, handleSingleModel
   const directiveBody = appendUserTurn(mgrBody, buildManagerStrategyPrompt(userPrompt));
 
   try {
-    const res = await withTimeout(handleSingleModel(directiveBody, managerModel, true), cfg.managerTimeoutMs);
+    const res = await withTimeout(handleSingleModel(directiveBody, managerModel, { isPanel: true, role: "manager" }), cfg.managerTimeoutMs);
     if (res?.__timeout || res?.__error) {
       markStageDone(runId, "manager", { strategy: null });
       return null;
@@ -351,7 +351,7 @@ async function dispatchWorkers({ runId, strategy, models, body, handleSingleMode
     // Workers get FULL unsanitized context (no IDE strip) + specialist directive as user turn.
     const workerBody = appendUserTurn(buildPanelBody(body), buildWorkerDirective(subtask));
     markWorkerStatus(runId, i, "running", { model: workerModel });
-    return withTimeout(handleSingleModel(workerBody, workerModel, true), cfg.workerHardTimeoutMs)
+    return withTimeout(handleSingleModel(workerBody, workerModel, { isPanel: true, role: "worker" }), cfg.workerHardTimeoutMs)
       .then(async (res) => {
         if (res?.__timeout || res?.__error) {
           markWorkerStatus(runId, i, "error", { model: workerModel });
@@ -405,7 +405,7 @@ async function runStaffAudit({ runId, strategy, workerOutputs, staffModel, audit
   const directiveBody = appendUserTurn(auditBody, buildStaffAuditPrompt(subtasksWithOutputs));
 
   try {
-    const res = await withTimeout(handleSingleModel(directiveBody, model, true), cfg.managerTimeoutMs);
+    const res = await withTimeout(handleSingleModel(directiveBody, model, { isPanel: true, role: "audit" }), cfg.managerTimeoutMs);
     if (res?.__timeout || res?.__error) {
       markStageDone(runId, "audit", { skipped: true });
       return null;
@@ -444,6 +444,10 @@ export async function handleSwarmChat({
   workerCount,
   swarmTuning,
   telemetry = true,
+  signal,
+  runBudget,
+  principalId,
+  autoScale,
 }) {
   const panel = models.filter(Boolean);
   if (panel.length === 0) {
@@ -456,7 +460,7 @@ export async function handleSwarmChat({
 
   // Single-model fast path: no point orchestrating a swarm over one model.
   if (panel.length === 1 && !managerModel && !staffModel && !auditModel) {
-    return handleSingleModel(body, panel[0]);
+    return handleSingleModel(body, panel[0], { role: "manager" });
   }
 
   // Capability gate: control roles (Manager/Staff/Audit) require tool use +
@@ -494,7 +498,7 @@ export async function handleSwarmChat({
       // Manager answers directly, streaming to client (original body preserved).
       log?.info?.("SWARM", "Gatekeeper bypass — simple request, direct answer");
       if (runId) markRunComplete(runId, { bypassed: true });
-      return handleSingleModel(body, manager);
+      return handleSingleModel(body, manager, { role: "manager" });
     }
 
     // ── Stage 1: Manager Strategy ──
@@ -506,15 +510,26 @@ export async function handleSwarmChat({
       // Strategy parse failed → fall back to direct answer.
       log?.warn?.("SWARM", "Strategy decomposition failed — falling back to direct answer");
       if (runId) markRunComplete(runId, { fallback: true });
-      return handleSingleModel(body, manager);
+      return handleSingleModel(body, manager, { role: "manager" });
     }
 
-    // Clamp worker count: honor per-combo workerCount if set, else fall back to
-    // maxWorkers safety cap. This makes the UI's worker count field effective.
-    const workerCap = (typeof workerCount === "number" && workerCount > 0)
-      ? Math.min(workerCount, cfg.maxWorkers)
-      : cfg.maxWorkers;
-    const effectiveSubtasks = strategy.subtasks.slice(0, workerCap);
+	    // Dynamic worker scaling: autoScale overrides static workerCount when enabled.
+	    // When the gatekeeper finds many subtasks, more workers are dispatched up to
+	    // autoScale.maxWorkers; few subtasks → minWorkers. Less manual tuning needed.
+	    let effectiveWorkerCount;
+	    if (autoScale?.enabled) {
+	      effectiveWorkerCount = Math.min(
+	        Math.max(strategy.subtasks.length, autoScale.minWorkers || 1),
+	        autoScale.maxWorkers || cfg.maxWorkers,
+	      );
+	      log?.info?.("SWARM", `Auto-scale: ${strategy.subtasks.length} subtasks → ${effectiveWorkerCount} workers (${autoScale.minWorkers || 1}–${autoScale.maxWorkers || cfg.maxWorkers})`);
+	    } else {
+	      // Static: honor per-combo workerCount if set, else fall back to maxWorkers cap.
+	      effectiveWorkerCount = (typeof workerCount === "number" && workerCount > 0)
+	        ? Math.min(workerCount, cfg.maxWorkers)
+	        : cfg.maxWorkers;
+	    }
+	    const effectiveSubtasks = strategy.subtasks.slice(0, effectiveWorkerCount);
 
     // ── Stage 2+3: Dispatch Workers (parallel) ──
     const workerOutputs = telemetry
@@ -529,9 +544,9 @@ export async function handleSwarmChat({
         // Return the single worker's output directly — include the actual text
         // so the manager has visibility (previously the text was discarded).
         const workerText = workerOutputs[0].text || "";
-        return handleSingleModel(appendUserTurn(body, `The specialist worker produced this answer for the subtask "${workerOutputs[0].subtask?.title || ""}". Output it verbatim to the user, adjusting only for formatting if needed:\n\n${workerText}`), manager);
+        return handleSingleModel(appendUserTurn(body, `The specialist worker produced this answer for the subtask "${workerOutputs[0].subtask?.title || ""}". Output it verbatim to the user, adjusting only for formatting if needed:\n\n${workerText}`), manager, { role: "manager" });
       }
-      return handleSingleModel(body, manager);
+      return handleSingleModel(body, manager, { role: "manager" });
     }
 
     // ── Stage 4: Staff Audit ──
@@ -554,7 +569,7 @@ export async function handleSwarmChat({
     // completion to fire markStageDone + markRunComplete after the last chunk.
     if (runId) {
       markStageStart(runId, "synthesis", { model: manager });
-      const res = await handleSingleModel(synthBody, manager);
+      const res = await handleSingleModel(synthBody, manager, { role: "manager" });
       // If the response has a streaming body, wrap it to detect completion.
       if (res?.body) {
         const originalBody = res.body;
@@ -598,12 +613,12 @@ export async function handleSwarmChat({
       return res;
     }
 
-    return handleSingleModel(synthBody, manager);
+    return handleSingleModel(synthBody, manager, { role: "manager" });
   } catch (e) {
     log?.error?.("SWARM", `Swarm failed: ${e?.message || e}`);
     if (runId) markRunError(runId, e);
     // Graceful degradation: fall back to direct answer on any uncaught error.
-    return handleSingleModel(body, manager);
+    return handleSingleModel(body, manager, { role: "manager" });
   }
 }
 
@@ -613,7 +628,7 @@ async function runGatekeeperNoTelemetry({ body, managerModel, handleSingleModel,
   const gateBody = stripIdeSystemPrompt(buildPanelBody(body));
   const directiveBody = appendUserTurn(gateBody, GATEKEEPER_PROMPT);
   try {
-    const res = await withTimeout(handleSingleModel(directiveBody, managerModel, true), cfg.managerTimeoutMs);
+    const res = await withTimeout(handleSingleModel(directiveBody, managerModel, { isPanel: true, role: "gatekeeper" }), cfg.managerTimeoutMs);
     if (res?.__timeout || res?.__error) return "complex";
     const text = extractPanelText(await res.clone().json().catch(() => ({})));
     return /VERDICT:\s*SIMPLE/i.test(text) ? "simple" : "complex";
@@ -627,7 +642,7 @@ async function runManagerStrategyNoTelemetry({ body, managerModel, handleSingleM
   const mgrBody = stripIdeSystemPrompt(buildPanelBody(body));
   const directiveBody = appendUserTurn(mgrBody, buildManagerStrategyPrompt(userPrompt));
   try {
-    const res = await withTimeout(handleSingleModel(directiveBody, managerModel, true), cfg.managerTimeoutMs);
+    const res = await withTimeout(handleSingleModel(directiveBody, managerModel, { isPanel: true, role: "manager" }), cfg.managerTimeoutMs);
     if (res?.__timeout || res?.__error) return null;
     const text = extractPanelText(await res.clone().json().catch(() => ({})));
     return parseStrategy(text);
@@ -646,7 +661,7 @@ async function dispatchWorkersNoTelemetry({ strategy, models, body, handleSingle
   const calls = strategy.subtasks.map((subtask, i) => {
     const workerModel = workerModels[i % workerModels.length];
     const workerBody = appendUserTurn(buildPanelBody(body), buildWorkerDirective(subtask));
-    return withTimeout(handleSingleModel(workerBody, workerModel, true), cfg.workerHardTimeoutMs)
+    return withTimeout(handleSingleModel(workerBody, workerModel, { isPanel: true, role: "worker" }), cfg.workerHardTimeoutMs)
       .then(async (res) => {
         if (res?.__timeout || res?.__error) return { ok: false, text: "" };
         if (!res?.ok) return { ok: false, text: "" };
@@ -680,7 +695,7 @@ async function runStaffAuditNoTelemetry({ strategy, workerOutputs, staffModel, a
   const auditBody = stripIdeSystemPrompt(buildPanelBody(body));
   const directiveBody = appendUserTurn(auditBody, buildStaffAuditPrompt(subtasksWithOutputs));
   try {
-    const res = await withTimeout(handleSingleModel(directiveBody, model, true), cfg.managerTimeoutMs);
+    const res = await withTimeout(handleSingleModel(directiveBody, model, { isPanel: true, role: "audit" }), cfg.managerTimeoutMs);
     if (res?.__timeout || res?.__error) return null;
     return extractPanelText(await res.clone().json().catch(() => ({})));
   } catch {

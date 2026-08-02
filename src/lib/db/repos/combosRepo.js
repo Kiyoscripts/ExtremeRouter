@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from "uuid";
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
+import { normalizeComboStrategyConfig } from "open-sse/services/comboConfig.js";
 
 function rowToCombo(row) {
   if (!row) return null;
@@ -9,6 +10,8 @@ function rowToCombo(row) {
     name: row.name,
     kind: row.kind,
     models: parseJson(row.models, []),
+    strategyConfig: normalizeComboStrategyConfig(parseJson(row.strategyConfig, {})),
+    revision: Number(row.revision) || 1,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -16,20 +19,17 @@ function rowToCombo(row) {
 
 export async function getCombos() {
   const db = await getAdapter();
-  const rows = db.all(`SELECT * FROM combos ORDER BY createdAt ASC`);
-  return rows.map(rowToCombo);
+  return db.all(`SELECT * FROM combos ORDER BY createdAt ASC`).map(rowToCombo);
 }
 
 export async function getComboById(id) {
   const db = await getAdapter();
-  const row = db.get(`SELECT * FROM combos WHERE id = ?`, [id]);
-  return rowToCombo(row);
+  return rowToCombo(db.get(`SELECT * FROM combos WHERE id = ?`, [id]));
 }
 
 export async function getComboByName(name) {
   const db = await getAdapter();
-  const row = db.get(`SELECT * FROM combos WHERE name = ?`, [name]);
-  return rowToCombo(row);
+  return rowToCombo(db.get(`SELECT * FROM combos WHERE name = ?`, [name]));
 }
 
 export async function createCombo(data) {
@@ -40,12 +40,14 @@ export async function createCombo(data) {
     name: data.name,
     kind: data.kind || null,
     models: data.models || [],
+    strategyConfig: normalizeComboStrategyConfig(data.strategyConfig),
+    revision: 1,
     createdAt: now,
     updatedAt: now,
   };
   db.run(
-    `INSERT INTO combos(id, name, kind, models, createdAt, updatedAt) VALUES(?, ?, ?, ?, ?, ?)`,
-    [combo.id, combo.name, combo.kind, stringifyJson(combo.models), combo.createdAt, combo.updatedAt]
+    `INSERT INTO combos(id, name, kind, models, strategyConfig, revision, createdAt, updatedAt) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
+    [combo.id, combo.name, combo.kind, stringifyJson(combo.models), stringifyJson(combo.strategyConfig), combo.revision, now, now],
   );
   return combo;
 }
@@ -53,21 +55,35 @@ export async function createCombo(data) {
 export async function updateCombo(id, data) {
   const db = await getAdapter();
   let result = null;
+  let conflict = false;
   db.transaction(() => {
     const row = db.get(`SELECT * FROM combos WHERE id = ?`, [id]);
     if (!row) return;
-    const merged = { ...rowToCombo(row), ...data, updatedAt: new Date().toISOString() };
+    const current = rowToCombo(row);
+    if (data.revision !== undefined && Number(data.revision) !== current.revision) {
+      conflict = true;
+      return;
+    }
+    const merged = {
+      ...current,
+      name: data.name !== undefined ? data.name : current.name,
+      kind: data.kind !== undefined ? data.kind : current.kind,
+      models: data.models !== undefined ? data.models : current.models,
+      strategyConfig: data.strategyConfig !== undefined ? normalizeComboStrategyConfig(data.strategyConfig) : current.strategyConfig,
+      revision: current.revision + 1,
+      updatedAt: new Date().toISOString(),
+    };
     db.run(
-      `UPDATE combos SET name = ?, kind = ?, models = ?, updatedAt = ? WHERE id = ?`,
-      [merged.name, merged.kind, stringifyJson(merged.models || []), merged.updatedAt, id]
+      `UPDATE combos SET name = ?, kind = ?, models = ?, strategyConfig = ?, revision = ?, updatedAt = ? WHERE id = ? AND revision = ?`,
+      [merged.name, merged.kind, stringifyJson(merged.models), stringifyJson(merged.strategyConfig), merged.revision, merged.updatedAt, id, current.revision],
     );
     result = merged;
   });
+  if (conflict) return { conflict: true };
   return result;
 }
 
 export async function deleteCombo(id) {
   const db = await getAdapter();
-  const res = db.run(`DELETE FROM combos WHERE id = ?`, [id]);
-  return (res?.changes ?? 0) > 0;
+  return (db.run(`DELETE FROM combos WHERE id = ?`, [id])?.changes ?? 0) > 0;
 }

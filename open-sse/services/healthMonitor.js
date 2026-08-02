@@ -54,7 +54,7 @@ function getOrCreate(provider, windowMs) {
 /**
  * Record a health sample (called from chat.js on both success and failure).
  */
-export function recordHealthSample(provider, { success, latencyMs, status }, settings = {}) {
+export function recordHealthSample(provider, { success, latencyMs, status, trafficClass = "user" }, settings = {}) {
   const cfg = { ...HEALTH_DEFAULTS, ...(settings?.healthMonitor || {}) };
 
   // Always get-or-create so we can update the enabled flag even when disabled.
@@ -66,8 +66,12 @@ export function recordHealthSample(provider, { success, latencyMs, status }, set
     if (m.emitTimer) { clearTimeout(m.emitTimer); m.emitTimer = null; }
     return;
   }
+  // Panel/coordinator traffic is intentionally excluded from routing health.
+  // A wide swarm should not outweigh user-facing requests or trigger shedding.
+  if (trafficClass !== "user") return;
+
   const now = Date.now();
-  const sample = { ts: now, success: !!success, latencyMs: latencyMs || 0, status: status || (success ? 200 : 0) };
+  const sample = { ts: now, success: !!success, latencyMs: latencyMs || 0, status: status || (success ? 200 : 0), trafficClass };
   m.samples.push(sample);
 
   // M1 fix: invalidate cached aggregate on every new sample.

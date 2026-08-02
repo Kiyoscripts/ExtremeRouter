@@ -3,6 +3,7 @@ import { needsTranslation } from "../../translator/index.js";
 import { fromOpenAIFinish } from "../../translator/concerns/finishReason.js";
 import { ollamaBodyToOpenAI } from "../../translator/response/ollama-to-openai.js";
 import { addBufferToUsage, filterUsageForFormat } from "../../utils/usageTracking.js";
+import { processJsonResponse } from "../../utils/jsonFence.js";
 import { createErrorResult } from "../../utils/error.js";
 import { HTTP_STATUS } from "../../config/runtimeConfig.js";
 import { parseSSEToOpenAIResponse } from "./sseToJsonHandler.js";
@@ -308,6 +309,16 @@ export async function handleNonStreamingResponse({ providerResponse, provider, m
   }
 
   reqLogger.logConvertedResponse(translatedResponse);
+
+  // Unwrap JSON fences (```json ... ```) when client requested structured output.
+  // Many providers (especially Claude-backed) wrap JSON in markdown fences even
+  // when instructed not to. Only applies to non-streaming paths.
+  if (translatedResponse?.choices?.[0]?.message && body?.response_format) {
+    const msg = translatedResponse.choices[0].message;
+    if (typeof msg.content === "string") {
+      msg.content = processJsonResponse(msg.content, body.response_format);
+    }
+  }
 
   saveRequestDetail(buildRequestDetail({
     provider, model, connectionId,

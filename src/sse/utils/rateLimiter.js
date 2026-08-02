@@ -30,31 +30,33 @@ const BUCKETS = (global._rateLimitBuckets ??= new Map());
  * @param {number} rpm - max requests per minute (default: 60)
  * @param {number} burst - max burst (default: 10)
  */
-export function checkRateLimit(key, rpm = DEFAULT_RPM, burst = DEFAULT_BURST) {
-  if (!key) return { allowed: true, retryAfterMs: 0, remaining: burst };
+export function checkRateLimit(key, rpm = DEFAULT_RPM, burst = DEFAULT_BURST, cost = 1) {
+  const normalizedCost = Math.max(1, Number(cost) || 1);
+  const capacity = Math.max(burst, normalizedCost);
+  if (!key) return { allowed: true, retryAfterMs: 0, remaining: capacity };
 
   const now = Date.now();
   const refillRate = rpm / (WINDOW_MS / 1000); // tokens per second
 
   let bucket = BUCKETS.get(key);
   if (!bucket || now - bucket.lastEvicted > EVICT_MS) {
-    bucket = { tokens: burst, lastRefill: now, lastEvicted: now };
+    bucket = { tokens: capacity, lastRefill: now, lastEvicted: now };
     BUCKETS.set(key, bucket);
   }
 
   // Refill tokens based on elapsed time
   const elapsed = (now - bucket.lastRefill) / 1000;
-  bucket.tokens = Math.min(burst, bucket.tokens + elapsed * refillRate);
+  bucket.tokens = Math.min(capacity, bucket.tokens + elapsed * refillRate);
   bucket.lastRefill = now;
   bucket.lastEvicted = now;
 
-  if (bucket.tokens >= 1) {
-    bucket.tokens -= 1;
+  if (bucket.tokens >= normalizedCost) {
+    bucket.tokens -= normalizedCost;
     return { allowed: true, retryAfterMs: 0, remaining: Math.floor(bucket.tokens) };
   }
 
   // Rate limited — calculate retry-after
-  const retryAfterMs = Math.ceil((1 - bucket.tokens) / refillRate * 1000);
+  const retryAfterMs = Math.ceil((normalizedCost - bucket.tokens) / refillRate * 1000);
   return { allowed: false, retryAfterMs: Math.max(retryAfterMs, 1000), remaining: 0 };
 }
 
