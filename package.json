@@ -83,5 +83,9 @@
     "postcss": "^8.5.6",
     "tailwindcss": "^4",
     "vitest": "3.2.4"
+  },
+  "overrides": {
+    "sharp": "0.35.3",
+    "postcss": "$postcss"
   }
 }

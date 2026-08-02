@@ -24,6 +24,7 @@ import { getTokenRouterUsage } from "./usage/tokenrouter.js";
 import { getClineUsage } from "./usage/cline.js";
 import { getGrokWebUsage } from "./usage/grok-web.js";
 import { getInfronUsage } from "./usage/infron.js";
+import { getKimchiUsage } from "./usage/kimchi.js";
 
 /**
  * Get usage data for a provider connection
@@ -56,6 +57,7 @@ const USAGE_HANDLERS = {
   clinepass: (c) => getClineUsage({ accessToken: c.accessToken, apiKey: c.apiKey }, c.proxyOptions),
   "grok-web": (c) => getGrokWebUsage({ apiKey: c.apiKey }, c.proxyOptions),
   infron: (c) => getInfronUsage({ apiKey: c.apiKey }, c.proxyOptions),
+  kimchi: (c) => getKimchiUsage(c.accessToken, c.proxyOptions),
 };
 
 export async function getUsageForProvider(connection, proxyOptions = null) {

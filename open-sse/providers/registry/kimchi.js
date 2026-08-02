@@ -42,6 +42,7 @@ export default {
     { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash" },
   ],
   serviceKinds: ["llm", "imageToText"],
+  features: { usage: true },
   oauth: {
     webAppUrl: "https://app.kimchi.dev",
     validationUrl: "https://api.cast.ai/v1/llm/openai/supported-providers",

@@ -74,7 +74,7 @@ export default function ComboOverview({ combos, comboStrategies, activeProviders
         <div className="mb-3 flex items-center justify-between">
           <div>
             <h3 className="text-sm font-semibold text-text-main">Combo Health</h3>
-            <p className="text-xs text-text-muted mt-0.5">Overview of each combo's status</p>
+            <p className="text-xs text-text-muted mt-0.5">Overview of each combo&apos;s status</p>
           </div>
           <Button size="sm" variant="ghost" icon="list_alt" onClick={onViewCombos}>View All</Button>
         </div>

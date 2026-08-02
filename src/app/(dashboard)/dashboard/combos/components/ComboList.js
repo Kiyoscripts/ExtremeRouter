@@ -79,7 +79,7 @@ export default function ComboList({ combos, modelCaps, activeProviders, comboStr
       {filtered.length === 0 ? (
         <Card>
           <div className="py-8 text-center text-sm text-text-muted">
-            No combos match "{search}" {strategyFilter !== "all" && `with ${strategyFilter} strategy`}
+            No combos match &quot;{search}&quot; {strategyFilter !== "all" && `with ${strategyFilter} strategy`}
           </div>
         </Card>
       ) : (

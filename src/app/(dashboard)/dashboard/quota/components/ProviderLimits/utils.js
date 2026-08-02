@@ -560,6 +560,38 @@ export function parseQuotaData(provider, data) {
         }
         break;
       }
+      case "kimchi": {
+        // Kimchi — credit balance (absolute) + USD budget progress.
+        // `credits` has no total → no percentage (info row); `budget` drives
+        // the progress bar via used/total + remainingPercentage.
+        if (data.quotas) {
+          Object.entries(data.quotas).forEach(([name, quota]) => {
+            normalizedQuotas.push({
+              name,
+              used: quota.used || 0,
+              total: quota.total || 0,
+              remaining: quota.remaining,
+              remainingPercentage: quota.remainingPercentage,
+              resetAt: quota.resetAt || null,
+              unit: quota.unit,
+              recurring: quota.recurring !== false,
+              unlimited: quota.unlimited === true,
+            });
+          });
+        }
+        // Plan/tier info when no numeric quotas resolved.
+        if (normalizedQuotas.length === 0 && data.plan) {
+          normalizedQuotas.push({
+            name: `${data.plan} (subscription)`,
+            used: 0,
+            total: 0,
+            remainingPercentage: null,
+            resetAt: null,
+            unlimited: true,
+          });
+        }
+        break;
+      }
       default:
         // Generic fallback for unknown providers
         if (data.quotas) {
