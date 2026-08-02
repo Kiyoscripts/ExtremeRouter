@@ -583,6 +583,25 @@ exports[`GOLDEN buildHeaders (default executor providers) > codebuddy-cn → hea
 }
 `;
 
+exports[`GOLDEN buildHeaders (default executor providers) > codestral → headers (apiKey / oauth) 1`] = `
+{
+  "apiKey": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+  "nonStream": {
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+  "oauth": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+}
+`;
+
 exports[`GOLDEN buildHeaders (default executor providers) > cody → headers (apiKey / oauth) 1`] = `
 {
   "apiKey": {
@@ -643,7 +662,45 @@ exports[`GOLDEN buildHeaders (default executor providers) > copilot-web → head
 }
 `;
 
+exports[`GOLDEN buildHeaders (default executor providers) > databricks → headers (apiKey / oauth) 1`] = `
+{
+  "apiKey": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+  "nonStream": {
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+  "oauth": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+}
+`;
+
 exports[`GOLDEN buildHeaders (default executor providers) > deepgram → headers (apiKey / oauth) 1`] = `
+{
+  "apiKey": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+  "nonStream": {
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+  "oauth": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+}
+`;
+
+exports[`GOLDEN buildHeaders (default executor providers) > deepinfra → headers (apiKey / oauth) 1`] = `
 {
   "apiKey": {
     "Accept": "text/event-stream",
@@ -1093,18 +1150,18 @@ exports[`GOLDEN buildHeaders (default executor providers) > kimchi → headers (
     "Accept": "text/event-stream",
     "Authorization": "Bearer <TOK>",
     "Content-Type": "application/json",
-    "User-Agent": "kimchi/0.1.50",
+    "User-Agent": "kimchi/0.1.76",
   },
   "nonStream": {
     "Authorization": "Bearer <TOK>",
     "Content-Type": "application/json",
-    "User-Agent": "kimchi/0.1.50",
+    "User-Agent": "kimchi/0.1.76",
   },
   "oauth": {
     "Accept": "text/event-stream",
     "Authorization": "Bearer <TOK>",
     "Content-Type": "application/json",
-    "User-Agent": "kimchi/0.1.50",
+    "User-Agent": "kimchi/0.1.76",
   },
 }
 `;
@@ -2204,6 +2261,13 @@ exports[`GOLDEN buildUrl (default executor providers) > codebuddy-cn → url (st
 }
 `;
 
+exports[`GOLDEN buildUrl (default executor providers) > codestral → url (stream + non-stream) 1`] = `
+{
+  "nonStream": "https://codestral.mistral.ai/v1/chat/completions",
+  "stream": "https://codestral.mistral.ai/v1/chat/completions",
+}
+`;
+
 exports[`GOLDEN buildUrl (default executor providers) > cody → url (stream + non-stream) 1`] = `
 {
   "nonStream": "https://sourcegraph.com/.api/llm/completions/Stream",
@@ -2225,10 +2289,24 @@ exports[`GOLDEN buildUrl (default executor providers) > copilot-web → url (str
 }
 `;
 
+exports[`GOLDEN buildUrl (default executor providers) > databricks → url (stream + non-stream) 1`] = `
+{
+  "nonStream": "https://adb-0000000000000000.0.azuredatabricks.net/serving-endpoints",
+  "stream": "https://adb-0000000000000000.0.azuredatabricks.net/serving-endpoints",
+}
+`;
+
 exports[`GOLDEN buildUrl (default executor providers) > deepgram → url (stream + non-stream) 1`] = `
 {
   "nonStream": "https://api.deepgram.com/v1/listen",
   "stream": "https://api.deepgram.com/v1/listen",
+}
+`;
+
+exports[`GOLDEN buildUrl (default executor providers) > deepinfra → url (stream + non-stream) 1`] = `
+{
+  "nonStream": "https://api.deepinfra.com/v1/openai/chat/completions",
+  "stream": "https://api.deepinfra.com/v1/openai/chat/completions",
 }
 `;
 
