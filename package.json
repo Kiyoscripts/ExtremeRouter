@@ -86,6 +86,7 @@
   },
   "overrides": {
     "sharp": "0.35.3",
-    "postcss": "$postcss"
+    "postcss": "$postcss",
+    "@noble/hashes": "2.2.0"
   }
 }
