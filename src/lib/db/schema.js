@@ -89,6 +89,8 @@ export const TABLES = {
       name: "TEXT UNIQUE NOT NULL",
       kind: "TEXT",
       models: "TEXT NOT NULL",
+      strategyConfig: "TEXT NOT NULL DEFAULT '{}'",
+      revision: "INTEGER NOT NULL DEFAULT 1",
       createdAt: "TEXT NOT NULL",
       updatedAt: "TEXT NOT NULL",
     },

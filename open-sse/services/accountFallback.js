@@ -65,6 +65,70 @@ export function getUnavailableUntil(cooldownMs) {
 }
 
 /**
+ * Compute the next-day reset timestamp (00:00 UTC tomorrow).
+ * Kimchi Community-tier quota resets daily — this is the cooldown target for
+ * quota-exhausted Kimchi accounts.
+ * @param {Date} [now=new Date()]
+ * @returns {Date}
+ */
+export function getNextDayReset(now = new Date()) {
+  const d = new Date(now.getTime());
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1, 0, 0, 0, 0));
+}
+
+/**
+ * Detect whether a Kimchi error indicates quota/credit exhaustion.
+ * Kimchi returns 402 (payment required) or an error body mentioning credits
+ * ("You ran out of credits. Top up at .../billing").
+ * @param {number} status - HTTP status
+ * @param {string|object} errorText - raw error body or message
+ * @returns {boolean}
+ */
+export function isKimchiQuotaExhaustedError(status, errorText) {
+  if (status === 402) return true;
+  const text = typeof errorText === "string"
+    ? errorText
+    : (() => { try { return JSON.stringify(errorText); } catch { return String(errorText); } })();
+  return /out of credits|credits.*(?:top up|billing|exhausted)|quota.*(?:exhausted|exceeded|reached)/i.test(text);
+}
+
+/**
+ * Build update payload that deactivates a Kimchi account due to quota exhaustion.
+ * Sets testStatus="quota_exhausted" (distinguishable from manual deactivation)
+ * and rateLimitedUntil to next-day reset (00:00 UTC), so the existing cooldown
+ * filters skip it until then. Auto-reactivation runs on startup / periodically.
+ * @param {Date} [now]
+ * @returns {object}
+ */
+export function buildKimchiQuotaExhaustedUpdate(now = new Date()) {
+  const reset = getNextDayReset(now);
+  return {
+    isActive: false,
+    rateLimitedUntil: reset.toISOString(),
+    testStatus: "quota_exhausted",
+    lastErrorType: "quota_exhausted",
+    errorCode: 402,
+    quotaExhaustedAt: now.toISOString(),
+    quotaResetsAt: reset.toISOString(),
+  };
+}
+
+/**
+ * Build update payload to reactivate a quota-exhausted Kimchi account whose
+ * rateLimitedUntil has passed (new day started).
+ * @returns {object}
+ */
+export function buildKimchiQuotaReactivatedUpdate() {
+  return {
+    isActive: true,
+    rateLimitedUntil: null,
+    testStatus: "active",
+    quotaExhaustedAt: null,
+    quotaResetsAt: null,
+  };
+}
+
+/**
  * Get the earliest rateLimitedUntil from a list of accounts
  * @param {Array} accounts - Array of account objects with rateLimitedUntil
  * @returns {string|null} Earliest rateLimitedUntil ISO string, or null

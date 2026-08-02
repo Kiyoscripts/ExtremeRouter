@@ -39,7 +39,7 @@ import { prefetchRemoteImages } from "../translator/concerns/prefetch.js";
  * @param {object} options.credentials - Provider credentials
  * @param {string} options.sourceFormatOverride - Override detected source format (e.g. "openai-responses")
  */
-export async function handleChatCore({ body, modelInfo, credentials, log, onCredentialsRefreshed, onRequestSuccess, onDisconnect, clientRawRequest, connectionId, userAgent, apiKey, ccFilterNaming, rtkEnabled, headroomEnabled, headroomUrl, headroomCompressUserMessages, cavemanEnabled, cavemanLevel, ponytailEnabled, ponytailLevel, sourceFormatOverride, providerThinking, semanticCacheEnabled, semanticCacheThreshold, pxpipeEnabled, pxpipeDir, pxpipeMinChars, pxpipeTimeoutMs }) {
+export async function handleChatCore({ body, modelInfo, credentials, log, onCredentialsRefreshed, onRequestSuccess, onDisconnect, clientRawRequest, connectionId, userAgent, apiKey, ccFilterNaming, rtkEnabled, headroomEnabled, headroomUrl, headroomCompressUserMessages, cavemanEnabled, cavemanLevel, ponytailEnabled, ponytailLevel, sourceFormatOverride, providerThinking, semanticCacheEnabled, semanticCacheThreshold, pxpipeEnabled, pxpipeDir, pxpipeMinChars, pxpipeTimeoutMs, externalSignal }) {
   const { provider, model } = modelInfo;
   const requestStartTime = Date.now();
 
@@ -286,6 +286,16 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     onError: () => trackPendingRequest(model, provider, connectionId, false),
     log, provider, model
   });
+
+  // CS-02: wire the run-level abort signal so external cancellation (quorum
+  // grace expiry, hard timeout, client disconnect) aborts the provider call.
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      streamController.abort();
+    } else {
+      externalSignal.addEventListener("abort", () => streamController.abort(), { once: true });
+    }
+  }
 
   const proxyOptions = {
     connectionProxyEnabled: credentials?.providerSpecificData?.connectionProxyEnabled === true,

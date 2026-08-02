@@ -56,7 +56,34 @@ function upsert(db, c) {
   );
 }
 
-export async function getProviderConnections(filter = {}) {
+// ── Connections cache (TPS optimization) ──────────────────────────────
+// getProviderConnections() is called on the request hot path (auth.js picks
+// an account per provider per request). Each call was a sync DB read.
+// Cache with a 2s TTL, keyed by the filter, with PROMISE memoization so a
+// concurrent burst collapses to a single DB read.
+//
+// Invalidation is SELECTIVE: updateProviderConnection() is also called on the
+// hot path (lastUsedAt / consecutiveUseCount rotation tracking). Wiping the
+// whole cache on every rotation write would make the cache useless. Only
+// "selection-relevant" fields (isActive, priority, credentials, rate limits)
+// invalidate; pure rotation/tracking metadata does not.
+const CONNECTIONS_CACHE_TTL_MS = 2000;
+const connectionsCache = new Map(); // filterKey → { promise, at }
+
+// Rotation/tracking fields that do NOT change which connection is selected.
+const ROTATION_META_FIELDS = new Set([
+  "lastUsedAt", "consecutiveUseCount", "lastRefreshAt",
+  "lastTested", "lastError", "lastErrorAt", "errorCode", "expiresIn",
+]);
+
+function connectionsCacheKey(filter = {}) {
+  const parts = [];
+  if (filter.provider) parts.push(`p:${filter.provider}`);
+  if (filter.isActive !== undefined) parts.push(`a:${filter.isActive ? 1 : 0}`);
+  return parts.length ? parts.join("|") : "all";
+}
+
+async function readConnectionsFresh(filter) {
   const db = await getAdapter();
   const where = [];
   const params = [];
@@ -67,6 +94,38 @@ export async function getProviderConnections(filter = {}) {
   const list = rows.map(rowToConn);
   list.sort((a, b) => (a.priority || 999) - (b.priority || 999));
   return list;
+}
+
+export async function getProviderConnections(filter = {}) {
+  const key = connectionsCacheKey(filter);
+  const now = Date.now();
+  const cached = connectionsCache.get(key);
+  if (cached && now - cached.at < CONNECTIONS_CACHE_TTL_MS) {
+    // Return a shallow array copy so callers can .sort()/.push() without
+    // mutating the shared cached array. Row objects are immutable in practice
+    // (all writes go through updateProviderConnection which rebuilds them).
+    return cached.promise.then((list) => list.slice());
+  }
+  const promise = readConnectionsFresh(filter).catch((err) => {
+    // Don't cache rejections — next caller retries immediately.
+    connectionsCache.delete(key);
+    throw err;
+  });
+  connectionsCache.set(key, { promise, at: now });
+  return promise.then((list) => list.slice());
+}
+
+function invalidateConnectionsCache() {
+  connectionsCache.clear();
+}
+
+// Exported so importDb/restore can drop stale cache after bulk writes.
+export { invalidateConnectionsCache };
+
+// True when an update touches a field that affects connection selection.
+function updateAffectsSelection(updates) {
+  if (!updates || typeof updates !== "object") return true;
+  return Object.keys(updates).some((k) => !ROTATION_META_FIELDS.has(k));
 }
 
 export async function getProviderConnectionById(id) {
@@ -163,6 +222,7 @@ export async function createProviderConnection(data) {
     result = conn;
   });
 
+  invalidateConnectionsCache();
   return result;
 }
 
@@ -179,6 +239,10 @@ export async function updateProviderConnection(id, data) {
     if (data.priority !== undefined) reorderInTx(db, existing.provider);
     result = merged;
   });
+  // Selective: rotation metadata (lastUsedAt etc.) does NOT invalidate the
+  // cache — those are written on every request in the hot path and would
+  // defeat the 2s TTL. Any selection-relevant field change invalidates.
+  if (updateAffectsSelection(data)) invalidateConnectionsCache();
   return result;
 }
 
@@ -192,6 +256,7 @@ export async function deleteProviderConnection(id) {
     reorderInTx(db, row.provider);
     ok = true;
   });
+  if (ok) invalidateConnectionsCache();
   return ok;
 }
 
@@ -199,12 +264,14 @@ export async function deleteProviderConnectionsByProvider(providerId) {
   const db = await getAdapter();
   const before = db.get(`SELECT COUNT(*) AS n FROM providerConnections WHERE provider = ?`, [providerId]);
   db.run(`DELETE FROM providerConnections WHERE provider = ?`, [providerId]);
+  if (before?.n) invalidateConnectionsCache();
   return before?.n || 0;
 }
 
 export async function reorderProviderConnections(providerId) {
   const db = await getAdapter();
   db.transaction(() => reorderInTx(db, providerId));
+  invalidateConnectionsCache();
 }
 
 export async function cleanupProviderConnections() {
@@ -235,5 +302,6 @@ export async function cleanupProviderConnections() {
       if (dirty) upsert(db, conn);
     }
   });
+  if (cleaned) invalidateConnectionsCache();
   return cleaned;
 }

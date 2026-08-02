@@ -42,6 +42,42 @@
 
 ---
 
+## 📊 Comparison: 9Router vs OmniRoute vs ExtremeRouter
+
+All three are AI gateway projects in the same family. ExtremeRouter is a fully independent evolution — it keeps the proven 9Router core, borrows the best ideas from OmniRoute, and adds its own architecture, UI, and reliability layer.
+
+| Feature | 9Router | OmniRoute | **ExtremeRouter** |
+|---------|---------|-----------|-------------------|
+| **Combo strategies** | 4 (fallback / round-robin / fusion / capacity) | 17 | **5** (fallback / round-robin / fusion / swarm / **cascade**) |
+| **Hierarchical Swarm** | ❌ | ❌ | ✅ Gatekeeper → Manager → Workers → Audit → Synthesis + live telemetry |
+| **Cascade (progressive escalation)** | ❌ | ❌ | ✅ Cheap → capable with self-reported confidence gating |
+| **Thinking per-combo** | ❌ | ❌ | ✅ Role-level overrides (manager=max, worker=medium) |
+| **AutoScale swarm workers** | ❌ | ❌ | ✅ Dynamic worker count from subtask complexity |
+| **Combo templates** | ❌ | ❌ | ✅ Model-first resolution across connected providers |
+| **Combo budget + admission control** | ❌ | ❌ | ✅ call/cost/output ceilings + per-key concurrency caps |
+| **Proxy-aware circuit breaker** | ❌ | ✅ DB-backed | ✅ per-`provider:proxyKey` (one dead proxy never blocks others) |
+| **TPS cache (settings + connections)** | ❌ (sync DB per request) | ❌ | ✅ 5s/2s TTL + promise memoization + selective invalidation |
+| **Per-provider selection mutex** | ❌ (global mutex) | ❌ | ✅ parallel selection across providers |
+| **Health monitoring** | ❌ | ❌ | ✅ cached aggregates + `health:degraded` SSE + auto-alerts |
+| **Structured Output + JSON fence** | ❌ | ✅ | ✅ `response_format` translation + ```` ```json ```` unwrapping |
+| **Provider capabilities layer** | ❌ | ❌ | ✅ control-role gating for web-cookie providers |
+| **Kimchi quota auto-reactivation** | ❌ | ❌ | ✅ daily reset sweep — no manual re-login |
+| **MITM intercept (5 CLI tools)** | ✅ | ✅ | ✅ SNI + HTTP/2 ALPN + binary EventStream + model alias mapping |
+| **Tunnel (Cloudflare + Tailscale)** | ✅ | ✅ | ✅ |
+| **Format translation** | ✅ OpenAI↔Claude↔Gemini | ✅ | ✅ OpenAI↔Claude↔Gemini↔Responses↔Antigravity |
+| **Token savers (RTK/Headroom/Caveman/Ponytail)** | ✅ | ✅ | ✅ |
+| **Provider count** | 40+ | 231+ | **154** (incl. 49 web-cookie free providers) |
+
+**What ExtremeRouter has that the others don't:**
+- Hierarchical Swarm engine with live telemetry (gatekeeper verdicts, per-worker lifecycle)
+- Cascade strategy — escalate only when confidence is low, saving cost on simple requests
+- Per-combo thinking + auto-scale, making multi-agent strategies production-ready
+- Proxy-aware resilience + TPS optimizations (from the VansRouter learnings)
+- 49 web-cookie providers for zero-cost access (Qwen Web, Claude Web, Gemini Web, ...)
+- Model-first combo templates that resolve to any connected provider
+
+---
+
 ## 🔄 How It Works
 
 ```
@@ -504,6 +540,29 @@ A dedicated **Cookies Provider** category (above OAuth on the Providers page) fo
 ### 🤖 Devin CLI Provider
 
 Devin (by Cognition) is session-based, not OpenAI-compatible. The Devin adapter bridges it: it creates a Devin session, polls for completion, and synthesizes an OpenAI SSE stream back. Models map to Devin agent modes — `devin-normal`, `devin-fast`, `devin-lite`, `devin-ultra`. Auth is API-key only (`cog_...`).
+
+### 🍜 Kimchi CLI Provider
+
+Kimchi (by Cast AI) is a free-tier coding assistant that provides access to open-source models — Kimi, MiniMax, Nemotron, DeepSeek — through a monthly/daily quota reset. ExtremeRouter integrates Kimchi as an **OAuth browser-login provider** (the same flow the official Kimchi CLI uses), so you log in once via `app.kimchi.dev` and the router keeps the session alive.
+
+**CLI alignment (masquerade):** the router sends the same `User-Agent: kimchi/<version>` header the official CLI sends, so the Kimchi server treats gateway traffic identically to the real CLI — no request discrimination, no extra restrictions.
+
+**Current model catalog (v0.1.76, aligned with the official CLI model-registry):**
+
+| Model | Role in Kimchi CLI | Notes |
+|-------|--------------------|-------|
+| `kimi-k2.7` | Orchestrator / Planner / Reviewer | Heavy reasoning + vision |
+| `kimi-k2.6` | Primary model | 262K context |
+| `minimax-m3` | Builder (default) | Heavy reasoning + vision |
+| `minimax-m2.7` | Secondary builder | Standard tier |
+| `nemotron-3-ultra-fp4` | Coding subagent | 1M context |
+| `deepseek-v4-flash` | Orchestration fallback | Fast + cheap |
+
+> Models marked **"ignored"** by the official CLI (`kimi-k2.5`, `claude-opus-4-6`, `claude-sonnet-4-6`, `glm-5-fp8`, `minimax-m2.5`) are deliberately **not** exposed — the server rejects or ignores them.
+
+**Quota auto-reactivation:** Kimchi Community tier resets quota at 00:00 UTC daily. When a request hits a quota-exhausted error (`402` / "out of credits"), the account is marked `quota_exhausted` and deactivated until the next-day reset. A background sweep (startup + every 30 min) automatically reactivates the account — **no manual re-login needed**.
+
+**Web search:** Kimchi supports web search as a built-in tool; model routing is exposed through ExtremeRouter's standard search/combo pipeline.
 
 ### 📝 Request Logging
 

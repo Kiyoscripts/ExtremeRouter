@@ -87,3 +87,8 @@ UI-AUDIT-REPORT.md
 
 # ZCode AI agent session artifacts (ephemeral — do not commit)
 .zcode/
+
+# Local agent work artifacts
+.workbuddy-ai/
+outputs/
+.zcode/

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Card, Button, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, ZedAuthModal, OneMinAuthModal, WpStudioAuthModal, IFlowCookieModal, GitLabAuthModal, EditConnectionModal, ConfirmModal } from "@/shared/components";
+import { Card, Button, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, ZedAuthModal, OneMinAuthModal, QwenAuthModal, WpStudioAuthModal, IFlowCookieModal, GitLabAuthModal, EditConnectionModal, ConfirmModal } from "@/shared/components";
 import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, WEB_COOKIE_PROVIDERS, getProviderAlias, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, AI_PROVIDERS, THINKING_CONFIG } from "@/shared/constants/providers";
 import { getModelsByProviderId } from "@/shared/constants/models";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
@@ -85,6 +85,11 @@ export default function ProviderDetailPage() {
 
   const AG_RISK_STORAGE_KEY = "ag_risk_confirmed";
 
+  // Web-cookie providers with dedicated multi-field auth modals that live outside
+  // the oauth category (so isOAuth is false). These need the dedicated modal
+  // (e.g. QwenAuthModal with bx-umidtoken, OneMinAuthModal with teamId).
+  const DEDICATED_COOKIE_AUTH = ["1min", "qwen-web"];
+
   const openOAuthConnection = () => {
     setShowOAuthModal(true);
   };
@@ -97,7 +102,7 @@ export default function ProviderDetailPage() {
         return;
       }
     }
-    if (isOAuth) {
+    if (isOAuth || DEDICATED_COOKIE_AUTH.includes(providerId)) {
       openOAuthConnection();
       return;
     }
@@ -111,7 +116,7 @@ export default function ProviderDetailPage() {
   };
 
   const triggerAddConnection = () => {
-    if (isOAuth) {
+    if (isOAuth || DEDICATED_COOKIE_AUTH.includes(providerId)) {
       triggerOAuthConnection();
       return;
     }
@@ -1166,6 +1171,8 @@ export default function ProviderDetailPage() {
         <CursorAuthModal isOpen={showOAuthModal} onSuccess={handleOAuthSuccess} onClose={() => setShowOAuthModal(false)} />
       ) : providerId === "1min" ? (
         <OneMinAuthModal isOpen={showOAuthModal} onSuccess={handleOAuthSuccess} onClose={() => setShowOAuthModal(false)} />
+      ) : providerId === "qwen-web" ? (
+        <QwenAuthModal isOpen={showOAuthModal} onSuccess={handleOAuthSuccess} onClose={() => setShowOAuthModal(false)} />
       ) : providerId === "wp-studio" ? (
         <WpStudioAuthModal isOpen={showOAuthModal} onSuccess={handleOAuthSuccess} onClose={() => setShowOAuthModal(false)} />
       ) : providerId === "zed" ? (

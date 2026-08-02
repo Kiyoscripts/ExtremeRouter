@@ -20,7 +20,9 @@ export default {
     baseUrl: "https://llm.kimchi.dev/openai/v1/chat/completions",
     format: "openai",
     headers: {
-      "User-Agent": "kimchi/0.1.50",
+      // Masquerade as the current Kimchi CLI so the server treats router
+      // traffic identically to the official CLI (v0.1.76 latest, 2026-07-31).
+      "User-Agent": "kimchi/0.1.76",
     },
     auth: {
       combined: true,
@@ -28,15 +30,16 @@ export default {
       scheme: "bearer",
     },
   },
+  // Active models per the official CLI model-registry (castai/kimchi).
+  // kimi-k2.5 / claude-opus-4-6 / claude-sonnet-4-6 are marked "ignored" by
+  // the CLI and are intentionally absent here.
   models: [
-    { id: "minimax-m3", name: "MiniMax-M3" },
-    { id: "kimi-k2.7", name: "Kimi-K2.7" },
-    { id: "kimi-k2.6", name: "Kimi-K2.6" },
-    { id: "kimi-k2.5", name: "Kimi-K2.5" },
+    { id: "kimi-k2.7", name: "Kimi K2.7" },
+    { id: "kimi-k2.6", name: "Kimi K2.6" },
+    { id: "minimax-m3", name: "MiniMax M3" },
+    { id: "minimax-m2.7", name: "MiniMax M2.7" },
     { id: "nemotron-3-ultra-fp4", name: "Nemotron 3 Ultra FP4" },
-    { id: "minimax-m2.7", name: "MiniMax-M2.7" },
-    { id: "claude-opus-4-6", name: "Claude Opus 4.6" },
-    { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" },
+    { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash" },
   ],
   serviceKinds: ["llm", "imageToText"],
   oauth: {

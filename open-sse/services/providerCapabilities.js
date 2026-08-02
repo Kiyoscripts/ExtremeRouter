@@ -14,6 +14,7 @@
  *   3. FULL_CAPS fallback (all true)
  */
 import REGISTRY from "../providers/registry/index.js";
+import { resolveProviderAlias } from "./model.js";
 
 // ── Default capability sets ─────────────────────────────────────────────
 
@@ -23,6 +24,17 @@ const FULL_CAPS = Object.freeze({
   fileAccess: true,
   streaming: true,
   multiTurn: true,
+  controlRole: true,
+  reliableJson: true,
+});
+
+const UNKNOWN_CAPS = Object.freeze({
+  toolUse: false,
+  fileAccess: false,
+  streaming: false,
+  multiTurn: false,
+  controlRole: false,
+  reliableJson: false,
 });
 
 /** Limited capabilities — web cookie providers (browser chat endpoints). */
@@ -31,6 +43,8 @@ const WEB_COOKIE_CAPS = Object.freeze({
   fileAccess: false,
   streaming: true,
   multiTurn: true,
+  controlRole: false,
+  reliableJson: false,
 });
 
 /** Per-category default capability sets. Categories not listed get FULL_CAPS. */
@@ -49,10 +63,10 @@ const DEFAULT_CAPS_BY_CATEGORY = {
  * provider can serve in those roles.
  */
 const CONTROL_ROLE_REQUIREMENTS = Object.freeze({
-  manager: { toolUse: true, fileAccess: true },
-  staff: { toolUse: true, fileAccess: true },
-  audit: { toolUse: true, fileAccess: true },
-  judge: { toolUse: true, fileAccess: true },
+  manager: { controlRole: true, reliableJson: true, multiTurn: true },
+  staff: { controlRole: true, reliableJson: true, multiTurn: true },
+  audit: { controlRole: true, reliableJson: true, multiTurn: true },
+  judge: { controlRole: true, reliableJson: true, multiTurn: true },
 });
 
 /** Check if a role is a control role (requires tool use + file access). */
@@ -84,7 +98,8 @@ for (const entry of REGISTRY) {
  * @returns {Object} capability flags { toolUse, fileAccess, streaming, multiTurn }
  */
 export function getProviderCaps(providerId) {
-  return PROVIDER_CAPS_CACHE.get(providerId) || { ...FULL_CAPS };
+  const canonical = resolveProviderAlias(providerId);
+  return PROVIDER_CAPS_CACHE.get(canonical) || { ...UNKNOWN_CAPS };
 }
 
 /**
@@ -97,7 +112,7 @@ export function getProviderCapsByModelStr(modelStr) {
   if (!modelStr || typeof modelStr !== "string") return { ...FULL_CAPS };
   const slashIdx = modelStr.indexOf("/");
   const providerId = slashIdx >= 0 ? modelStr.slice(0, slashIdx) : modelStr;
-  return getProviderCaps(providerId);
+  return getProviderCaps(resolveProviderAlias(providerId));
 }
 
 /**
@@ -129,7 +144,7 @@ export function canModelStrServeRole(modelStr, role) {
   if (!modelStr || typeof modelStr !== "string") return true; // empty = auto, allow
   const slashIdx = modelStr.indexOf("/");
   const providerId = slashIdx >= 0 ? modelStr.slice(0, slashIdx) : modelStr;
-  return canServeRole(providerId, role);
+  return canServeRole(resolveProviderAlias(providerId), role);
 }
 
 // ── Combo validation ────────────────────────────────────────────────────

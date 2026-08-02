@@ -29,18 +29,18 @@ const CHATS_NEW_URL = `${BASE_URL}/api/v2/chats/new`;
 const CHAT_COMPLETIONS_URL = `${BASE_URL}/api/v2/chat/completions`;
 
 const USER_AGENT =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36";
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36";
 
 // Anti-bot headers the v2 endpoint expects. bx-umidtoken is normally minted per-session from
 // sg-wum.alibaba.com; a captured value travels with the cookie jar, but we send a static fallback
-// so the header is always present.
-const BX_VERSION = "2.5.36";
+// so the header is always present. Try to extract a real value from the cookie string first.
+const BX_VERSION = "2.5.37";
 const BX_UMIDTOKEN_FALLBACK = "T2gA0000000000000000000000000000000000000000";
 
 // Qwen SPA version — required by the v2 chat completion endpoint. Without this header the upstream
 // returns HTTP 200 with {"success":false,"data":{"code":"Bad_Request"}} for every request.
-// Pinned from a live capture; bump if Qwen ships a breaking change.
-const QWEN_SPA_VERSION = "0.2.66";
+// Captured 30 Jul 2026 from a live chat.qwen.ai session (Chrome 150, SPA 0.2.80).
+const QWEN_SPA_VERSION = "0.2.80";
 
 const MODEL_ALIASES = {
   // Legacy ids → current upstream catalog (GET /api/models).
@@ -85,7 +85,14 @@ function stripCookieInputPrefix(rawValue) {
 function buildQwenCookieHeader(rawValue) {
   const trimmed = stripCookieInputPrefix(rawValue);
   if (!trimmed || !trimmed.includes("=")) return "";
-  return trimmed;
+  // Strip bx-umidtoken from the cookie string — it's sent as a header, not a cookie.
+  // Users can paste "bx-umidtoken=..." alongside their cookie jar; we extract it
+  // via extractQwenUmidToken() and send it as a header, not as a Cookie value.
+  return trimmed
+    .replace(/(?:^|;\s*)bx-umidtoken=[^;\s]+/g, "")
+    .replace(/^;\s*/, "")
+    .replace(/;\s*$/, "")
+    .trim();
 }
 
 // Extract the Qwen bearer token: a `token=...` cookie pair, or a bare token (no cookie pairs).
@@ -94,6 +101,15 @@ function extractQwenToken(rawValue) {
   if (!trimmed) return "";
   if (!trimmed.includes("=")) return trimmed;
   const match = trimmed.match(/(?:^|;\s*)token=([^;\s]+)/);
+  return match ? match[1] : "";
+}
+
+// Extract bx-umidtoken from the cookie jar if the user captured it. Some cookie
+// captures include bx-umidtoken as a cookie pair; if so, use it instead of the
+// static fallback. Falls back to BX_UMIDTOKEN_FALLBACK when not present.
+function extractQwenUmidToken(cookieStr) {
+  if (!cookieStr || !cookieStr.includes("=")) return "";
+  const match = cookieStr.match(/(?:^|;\s*)bx-umidtoken=([^;\s]+)/);
   return match ? match[1] : "";
 }
 
@@ -118,7 +134,7 @@ const WAF_ERROR_MESSAGE =
 
 // ── Headers ─────────────────────────────────────────────────────────────
 
-function buildHeaders(token, cookieHeader, chatId) {
+function buildHeaders(token, cookieHeader, chatId, umidToken) {
   const headers = {
     "Content-Type": "application/json",
     Accept: "*/*",
@@ -129,7 +145,17 @@ function buildHeaders(token, cookieHeader, chatId) {
     version: QWEN_SPA_VERSION,
     "x-request-id": uuid(),
     "bx-v": BX_VERSION,
-    "bx-umidtoken": BX_UMIDTOKEN_FALLBACK,
+    // Prefer a real bx-umidtoken from the cookie jar; fall back to static.
+    "bx-umidtoken": umidToken || extractQwenUmidToken(cookieHeader) || BX_UMIDTOKEN_FALLBACK,
+    // Browser headers the v2 endpoint expects (captured from live Chrome 150).
+    "sec-ch-ua": '"Not;A=Brand";v="8", "Chromium";v="150", "Brave";v="150"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"Windows"',
+    "sec-fetch-dest": "empty",
+    "sec-fetch-mode": "cors",
+    "sec-fetch-site": "same-origin",
+    // Qwen SPA sends a timezone header; include server local time to match browser behavior.
+    timezone: new Date().toString(),
   };
   if (token) headers["Authorization"] = `Bearer ${token}`;
   if (cookieHeader) headers["Cookie"] = cookieHeader;
@@ -393,6 +419,8 @@ export class QwenWebExecutor extends BaseExecutor {
     const cookieHeader = buildQwenCookieHeader(rawCred);
     let token = extractQwenToken(rawCred);
     if (!token && credentials?.accessToken) token = String(credentials.accessToken).trim();
+    // bx-umidtoken stored separately via QwenAuthModal (providerSpecificData.umidToken).
+    const umidToken = credentials?.providerSpecificData?.umidToken || "";
 
     if (!token && !cookieHeader) {
       return {
@@ -418,12 +446,13 @@ export class QwenWebExecutor extends BaseExecutor {
         CHATS_NEW_URL,
         {
           method: "POST",
-          headers: buildHeaders(token, cookieHeader),
+          headers: buildHeaders(token, cookieHeader, undefined, umidToken),
           body: JSON.stringify({
-            title: "New Chat",
+            chatId: "",
             models: [modelId],
-            chat_mode: "normal",
+            project_id: "",
             chat_type: "t2t",
+            chat_mode: "normal",
             timestamp: Date.now(),
           }),
           signal,
@@ -454,10 +483,21 @@ export class QwenWebExecutor extends BaseExecutor {
       }
 
       const data = await newChatRes.json();
-      chatId = data?.data?.id ?? "";
+      // Try multiple response paths — Qwen's v2 API has used data.id, data.chat_id,
+      // and at times nested data.data.id across SPA version changes.
+      chatId = data?.data?.id ?? data?.id ?? data?.chat_id ?? "";
       if (!chatId) {
+        // Surface the upstream error code/message so operators can diagnose
+        // expired cookies, stale SPA version, or unrecognized model names
+        // without needing to reproduce the request in a browser.
+        const upstreamCode = data?.data?.code || data?.code;
+        const upstreamMsg = data?.data?.message || data?.message;
+        const detail = [upstreamCode, upstreamMsg].filter(Boolean).join(": ");
+        const hint = detail
+          ? ` (${detail})`
+          : " — check cookie validity, SPA version (QWEN_SPA_VERSION), and model name";
         return {
-          response: errorResponse(502, "Qwen create-chat returned no chat id"),
+          response: errorResponse(502, `Qwen create-chat returned no chat id${hint}`),
           url: CHATS_NEW_URL,
           headers: {},
           transformedBody: body,
@@ -485,7 +525,7 @@ export class QwenWebExecutor extends BaseExecutor {
         completionUrl,
         {
           method: "POST",
-          headers: buildHeaders(token, cookieHeader, chatId),
+          headers: buildHeaders(token, cookieHeader, chatId, umidToken),
           body: JSON.stringify(msgPayload),
           signal,
         },
@@ -534,7 +574,7 @@ export class QwenWebExecutor extends BaseExecutor {
         return {
           response: errorResponse(502, `Qwen error: ${error}`, "UPSTREAM_ERROR"),
           url: completionUrl,
-          headers: buildHeaders(token, cookieHeader, chatId),
+          headers: buildHeaders(token, cookieHeader, chatId, umidToken),
           transformedBody: msgPayload,
         };
       }
@@ -552,7 +592,7 @@ export class QwenWebExecutor extends BaseExecutor {
           { status: 200, headers: { "Content-Type": "application/json" } }
         ),
         url: completionUrl,
-        headers: buildHeaders(token, cookieHeader, chatId),
+        headers: buildHeaders(token, cookieHeader, chatId, umidToken),
         transformedBody: msgPayload,
       };
     }
@@ -565,7 +605,7 @@ export class QwenWebExecutor extends BaseExecutor {
         headers: { ...SSE_HEADERS_NO_BUFFER },
       }),
       url: completionUrl,
-      headers: buildHeaders(token, cookieHeader, chatId),
+      headers: buildHeaders(token, cookieHeader, chatId, umidToken),
       transformedBody: msgPayload,
     };
   }

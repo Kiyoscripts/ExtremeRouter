@@ -190,6 +190,25 @@ export function openaiResponsesToOpenAIRequest(model, body, stream, credentials)
   delete result.store;
   delete result.reasoning;
 
+  // Map Responses API text.format → Chat Completions response_format (reverse direction).
+  // Prevents text.format from leaking as an unknown field in Chat Completions requests.
+  if (result.text?.format) {
+    const fmt = result.text.format;
+    if (fmt.type === "json_schema" && fmt.schema) {
+      result.response_format = {
+        type: "json_schema",
+        json_schema: {
+          name: fmt.name || "structured_output",
+          schema: fmt.schema,
+          strict: fmt.strict || false,
+        },
+      };
+    } else if (fmt.type === "json_object") {
+      result.response_format = { type: "json_object" };
+    }
+    delete result.text;
+  }
+
   return result;
 }
 
@@ -318,6 +337,25 @@ export function openaiToOpenAIResponsesRequest(model, body, stream, credentials)
   if (body.top_p !== undefined) result.top_p = body.top_p;
   if (body.reasoning !== undefined) result.reasoning = body.reasoning;
   if (body.reasoning_effort !== undefined) result.reasoning = { effort: body.reasoning_effort, summary: "auto" };
+
+  // Map Chat Completions response_format → Responses API text.format
+  // (Structured Output). Without this, json_schema/json_object is silently
+  // dropped when translating Chat → Responses (e.g. for Codex-family models).
+  if (body.response_format) {
+    const rf = body.response_format;
+    if (rf.type === "json_schema" && rf.json_schema) {
+      result.text = {
+        format: {
+          type: "json_schema",
+          name: rf.json_schema.name || "structured_output",
+          schema: rf.json_schema.schema || rf.json_schema,
+          strict: rf.json_schema.strict || false,
+        },
+      };
+    } else if (rf.type === "json_object") {
+      result.text = { format: { type: "json_object" } };
+    }
+  }
 
   return result;
 }

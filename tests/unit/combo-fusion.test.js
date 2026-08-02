@@ -22,51 +22,51 @@ describe("fusion combo", () => {
     const handleSingleModel = vi.fn(async () => okResponse("solo"));
     await handleFusionChat({
       body: { messages: [{ role: "user", content: "hi" }] },
-      models: ["p/only"],
+      models: ["anthropic/only"],
       handleSingleModel,
       log,
     });
     expect(handleSingleModel).toHaveBeenCalledTimes(1);
-    expect(handleSingleModel.mock.calls[0][1]).toBe("p/only");
+    expect(handleSingleModel.mock.calls[0][1]).toBe("anthropic/only");
   });
 
   it("fans out to the panel then routes a synthesis turn to the judge", async () => {
     const seen = [];
     const handleSingleModel = vi.fn(async (body, model, isPanel) => {
       seen.push(model);
-      if (model === "p/judge") return okResponse("FINAL");
+      if (model === "anthropic/judge") return okResponse("FINAL");
       return okResponse(`ans-${model}`);
     });
 
     const res = await handleFusionChat({
       body: { messages: [{ role: "user", content: "Q" }], stream: true, tools: [{ name: "x" }] },
-      models: ["p/a", "p/b", "p/c"],
+      models: ["anthropic/a", "anthropic/b", "anthropic/c"],
       handleSingleModel,
       log,
-      judgeModel: "p/judge",
+      judgeModel: "anthropic/judge",
     });
 
     // 3 panel calls + 1 judge call.
     expect(handleSingleModel).toHaveBeenCalledTimes(4);
-    expect(seen.slice(0, 3).sort()).toEqual(["p/a", "p/b", "p/c"]);
-    expect(seen[3]).toBe("p/judge");
+    expect(seen.slice(0, 3).sort()).toEqual(["anthropic/a", "anthropic/b", "anthropic/c"]);
+    expect(seen[3]).toBe("anthropic/judge");
 
     // Panel calls are non-streaming with tools stripped.
-    for (const [body, model, isPanel] of handleSingleModel.mock.calls.filter(([, m]) => m !== "p/judge")) {
+    for (const [body, model, isPanel] of handleSingleModel.mock.calls.filter(([, m]) => m !== "anthropic/judge")) {
       expect(body.stream).toBe(false);
       expect(body.tools).toBeUndefined();
-      expect(isPanel).toBe(true);
+      expect(isPanel?.isPanel).toBe(true);
     }
 
     // Judge call carries every panel answer + keeps the client's stream flag.
-    const [judgeBody, , isPanel] = handleSingleModel.mock.calls.find(([, m]) => m === "p/judge");
+    const [judgeBody, , isPanel] = handleSingleModel.mock.calls.find(([, m]) => m === "anthropic/judge");
     const judgeText = judgeBody.messages.at(-1).content;
-    expect(judgeText).toContain("ans-p/a");
-    expect(judgeText).toContain("ans-p/b");
-    expect(judgeText).toContain("ans-p/c");
+    expect(judgeText).toContain("ans-anthropic/a");
+    expect(judgeText).toContain("ans-anthropic/b");
+    expect(judgeText).toContain("ans-anthropic/c");
     expect(judgeText).toContain("Source 1");
     expect(judgeBody.stream).toBe(true);
-    expect(isPanel).toBeUndefined();
+    expect(isPanel?.isPanel).toBeFalsy();
 
     expect(res.ok).toBe(true);
   });
@@ -76,28 +76,28 @@ describe("fusion combo", () => {
     const handleSingleModel = vi.fn(async (_body, model) => { seen.push(model); return okResponse(`ans-${model}`); });
     await handleFusionChat({
       body: { messages: [{ role: "user", content: "Q" }] },
-      models: ["p/first", "p/second"],
+      models: ["anthropic/first", "anthropic/second"],
       handleSingleModel,
       log,
     });
     // Last call is the judge; defaults to panel[0].
-    expect(seen.at(-1)).toBe("p/first");
+    expect(seen.at(-1)).toBe("anthropic/first");
   });
 
   it("proceeds on quorum without waiting for a straggler (grace window)", async () => {
     const handleSingleModel = vi.fn(async (_body, model) => {
-      if (model === "p/slow") return okResponse("slow", { delayMs: 5000 });
-      if (model === "p/judge") return okResponse("FINAL");
+      if (model === "anthropic/slow") return okResponse("slow", { delayMs: 5000 });
+      if (model === "anthropic/judge") return okResponse("FINAL");
       return okResponse(`fast-${model}`);
     });
 
     const t0 = Date.now();
     await handleFusionChat({
       body: { messages: [{ role: "user", content: "Q" }] },
-      models: ["p/x", "p/y", "p/slow"],
+      models: ["anthropic/x", "anthropic/y", "anthropic/slow"],
       handleSingleModel,
       log,
-      judgeModel: "p/judge",
+      judgeModel: "anthropic/judge",
       tuning: { minPanel: 2, stragglerGraceMs: 50, panelHardTimeoutMs: 10000 },
     });
     const elapsed = Date.now() - t0;
@@ -105,28 +105,28 @@ describe("fusion combo", () => {
     // Two fast answers reach quorum; grace is 50ms, so we never wait ~5s for p/slow.
     expect(elapsed).toBeLessThan(2000);
 
-    const judgeCall = handleSingleModel.mock.calls.find(([, m]) => m === "p/judge");
+    const judgeCall = handleSingleModel.mock.calls.find(([, m]) => m === "anthropic/judge");
     const judgeText = judgeCall[0].messages.at(-1).content;
-    expect(judgeText).toContain("fast-p/x");
-    expect(judgeText).toContain("fast-p/y");
+    expect(judgeText).toContain("fast-anthropic/x");
+    expect(judgeText).toContain("fast-anthropic/y");
     expect(judgeText).not.toContain("slow");
   });
 
   it("returns the lone survivor directly when only one panel model succeeds", async () => {
     const handleSingleModel = vi.fn(async (_body, model) => {
-      if (model === "p/ok") return okResponse("lone");
+      if (model === "anthropic/ok") return okResponse("lone");
       return errResponse(500);
     });
     await handleFusionChat({
       body: { messages: [{ role: "user", content: "Q" }] },
-      models: ["p/ok", "p/bad"],
+      models: ["anthropic/ok", "anthropic/bad"],
       handleSingleModel,
       log,
-      judgeModel: "p/judge",
+      judgeModel: "anthropic/judge",
       tuning: { minPanel: 2, stragglerGraceMs: 50, panelHardTimeoutMs: 5000 },
     });
     // No judge call — single answer means there is nothing to fuse.
-    const judged = handleSingleModel.mock.calls.some(([, m]) => m === "p/judge");
+    const judged = handleSingleModel.mock.calls.some(([, m]) => m === "anthropic/judge");
     expect(judged).toBe(false);
   });
 
@@ -134,7 +134,7 @@ describe("fusion combo", () => {
     const handleSingleModel = vi.fn(async () => errResponse(500));
     const res = await handleFusionChat({
       body: { messages: [{ role: "user", content: "Q" }] },
-      models: ["p/a", "p/b"],
+      models: ["anthropic/a", "anthropic/b"],
       handleSingleModel,
       log,
       tuning: { minPanel: 2, stragglerGraceMs: 50, panelHardTimeoutMs: 5000 },
@@ -154,14 +154,14 @@ describe("fusion combo", () => {
         ],
         tools: [{ type: "function" }]
       },
-      models: ["p/a", "p/b"],
+      models: ["anthropic/a", "anthropic/b"],
       handleSingleModel,
       log,
-      judgeModel: "p/judge"
+      judgeModel: "anthropic/judge"
     });
 
     // Panel calls keep every turn but tool turns are flattened to assistant prose.
-    const panelCalls = handleSingleModel.mock.calls.filter(([,, isPanel]) => isPanel === true);
+    const panelCalls = handleSingleModel.mock.calls.filter(([,, isPanel]) => isPanel?.isPanel === true);
     expect(panelCalls.length).toBe(2);
     for (const [panelBody] of panelCalls) {
       expect(panelBody.tools).toBeUndefined();
@@ -175,7 +175,7 @@ describe("fusion combo", () => {
     }
 
     // Judge call still receives the unmodified history + synthesis prompt.
-    const judgeCall = handleSingleModel.mock.calls.find(([, m]) => m === "p/judge");
+    const judgeCall = handleSingleModel.mock.calls.find(([, m]) => m === "anthropic/judge");
     expect(judgeCall).toBeDefined();
     const judgeBody = judgeCall[0];
     expect(judgeBody.messages.length).toBe(5); // original 4 + judge prompt turn
@@ -194,13 +194,13 @@ describe("fusion combo", () => {
         ],
         tools: [{ name: "run", description: "d" }]
       },
-      models: ["p/a", "p/b"],
+      models: ["anthropic/a", "anthropic/b"],
       handleSingleModel,
       log,
-      judgeModel: "p/judge"
+      judgeModel: "anthropic/judge"
     });
 
-    const panelCalls = handleSingleModel.mock.calls.filter(([,, isPanel]) => isPanel === true);
+    const panelCalls = handleSingleModel.mock.calls.filter(([,, isPanel]) => isPanel?.isPanel === true);
     expect(panelCalls.length).toBe(2);
     const panelBody = panelCalls[0][0];
     
@@ -208,7 +208,7 @@ describe("fusion combo", () => {
     expect(panelBody.messages.length).toBe(3);
     
     // Flattened tool_use
-    expect(panelBody.messages[1].content).toBe("ok\n[Called tools: run]");
+    expect(panelBody.messages[1].content).toBe("ok\n[Called tool: run]");
     
     // Flattened tool_result
     expect(panelBody.messages[2].content).toBe("[Tool result: done]");

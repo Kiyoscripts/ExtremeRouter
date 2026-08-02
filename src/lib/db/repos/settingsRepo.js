@@ -101,9 +101,39 @@ function mergeWithDefaults(raw) {
   return merged;
 }
 
-export async function getSettings() {
+// ── Settings cache (TPS optimization) ─────────────────────────────────
+// getSettings() is called on EVERY request hot path (chat, embeddings, fetch,
+// search, stt, tts, auth...). Each call was a sync DB read + JSON parse.
+// Cache with a 5s TTL and PROMISE memoization: when the cache is cold, the
+// first caller reads the DB and the in-flight promise is shared with all
+// concurrent callers (stampede protection — only one DB read even under a
+// burst). Invalidated on updateSettings() so edits are visible immediately.
+const SETTINGS_CACHE_TTL_MS = 5000;
+let settingsCacheState = null; // { promise, at }
+
+async function readSettingsFresh() {
   const raw = await readRaw();
   return mergeWithDefaults(raw);
+}
+
+function invalidateSettingsCache() {
+  settingsCacheState = null;
+}
+
+// Exported so importDb/restore can drop stale cache after bulk writes.
+export { invalidateSettingsCache };
+
+export async function getSettings() {
+  const now = Date.now();
+  const cached = settingsCacheState;
+  if (cached && now - cached.at < SETTINGS_CACHE_TTL_MS) return cached.promise;
+  const promise = readSettingsFresh().catch((err) => {
+    // Don't cache rejections — the next caller retries immediately.
+    settingsCacheState = null;
+    throw err;
+  });
+  settingsCacheState = { promise, at: now };
+  return promise;
 }
 
 // Atomic read-merge-write inside transaction (prevents losing concurrent updates)
@@ -140,6 +170,7 @@ export async function updateSettings(updates) {
       [stringifyJson(next)]
     );
   });
+  invalidateSettingsCache();
   return mergeWithDefaults(next);
 }
 

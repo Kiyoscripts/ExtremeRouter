@@ -24,12 +24,12 @@ export default {
     notice: {
       signupUrl: "https://chat.qwen.ai",
       apiKeyUrl: "https://chat.qwen.ai",
-      text: "Alibaba Tongyi Qwen Chat free web access. Open chat.qwen.ai, log in, then copy your FULL Cookie header (DevTools → Network → any request → Request Headers → Cookie, or DevTools → Application → Cookies). Paste ALL cookies here — the WAF (baxia) requires the complete cookie jar (cna, ssxmod_itna, token, ...), not just the bearer token. The auth token is read from the `token` cookie automatically. Responses are streamed from the v2 API and translated to OpenAI format.",
+      text: "Alibaba Tongyi Qwen Chat free web access. Open chat.qwen.ai, log in, then copy your FULL Cookie header (DevTools → Network → any request → Request Headers → Cookie, or DevTools → Application → Cookies). Paste ALL cookies here — the WAF (baxia) requires the complete cookie jar (cna, ssxmod_itna, token, ...), not just the bearer token. The auth token is read from the `token` cookie automatically. Optionally append `bx-umidtoken=<value>` (captured from DevTools → Network → request headers) to bypass the anti-bot check if you get 'unauthorized' errors. Responses are streamed from the v2 API and translated to OpenAI format.",
     },
   },
   category: "webCookie",
   authType: "cookie",
-  authHint: "Paste your FULL Cookie header from chat.qwen.ai (must include cna, ssxmod_itna and token cookies).",
+  authHint: "Paste your FULL Cookie header from chat.qwen.ai (must include cna, ssxmod_itna and token cookies). Optionally append bx-umidtoken=<value> (from request headers) if you get 'unauthorized' errors.",
   transport: {
     baseUrl: "https://chat.qwen.ai",
     format: "qwen-web",
