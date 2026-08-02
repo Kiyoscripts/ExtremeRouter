@@ -19,6 +19,11 @@ export default {
   transport: {
     baseUrl: "https://llm.kimchi.dev/openai/v1/chat/completions",
     format: "openai",
+    // Kimchi (hosted vLLM) REJECTS non-streaming requests carrying
+    // stream_options (returns 400 "stream_options is only allowed when stream is
+    // enabled"). DefaultExecutor auto-injects stream_options for streaming
+    // requests, so we drop any client-sent value outright.
+    quirks: { dropStreamOptions: true },
     headers: {
       // Masquerade as the current Kimchi CLI so the server treats router
       // traffic identically to the official CLI (v0.1.76 latest, 2026-07-31).
