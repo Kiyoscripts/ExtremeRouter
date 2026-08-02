@@ -5,8 +5,17 @@ const allowedByRule = (allowed, model) => allowed.some((rule) => rule === model 
 
 export async function buildComboExecutionGraph(combo, legacyConfig = {}) {
   const members = Array.isArray(combo?.models) ? [...combo.models] : [];
+  // Strategy resolution order:
+  //   1. legacyConfig (settings.comboStrategies[comboName]) — the location the
+  //      ComboCard strategy editor writes to. It is the user's live override.
+  //   2. combo.strategyConfig — the persisted combo definition. This is ALWAYS
+  //      non-empty (create fills in normalized defaults), so it must NOT take
+  //      precedence over a settings override — otherwise editing strategy in
+  //      the UI appears to "not stick" (dispatch keeps using the stale default).
   const config = normalizeComboStrategyConfig(
-    combo?.strategyConfig && Object.keys(combo.strategyConfig).length ? combo.strategyConfig : legacyConfig,
+    legacyConfig && typeof legacyConfig === "object" && Object.keys(legacyConfig).length
+      ? legacyConfig
+      : combo?.strategyConfig,
   );
   const first = members[0] || "";
   const roleModels = config.fallbackStrategy === "fusion"

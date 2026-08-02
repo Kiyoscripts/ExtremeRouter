@@ -149,7 +149,7 @@ export async function handleChat(request, clientRawRequest = null) {
   const combo = !modelStr.includes("/") ? await getComboByName(modelStr) : null;
   if (combo?.models?.length) {
     try {
-      const graph = await buildComboExecutionGraph(combo, settings.comboStrategies?.[modelStr] || { fallbackStrategy: settings.comboStrategy });
+      const graph = await buildComboExecutionGraph(combo, settings.comboStrategies?.[modelStr]);
       const authz = authorizeComboExecution(keyObj, graph);
       if (!authz.allowed) {
         log.warn("AUTH", `Combo "${modelStr}" denied expanded models: ${authz.denied.join(", ")}`);
