@@ -5,7 +5,7 @@ import {
   extractApiKey,
   isValidApiKey,
 } from "../services/auth.js";
-import { getSettings, getCombos } from "@/lib/localDb";
+import { getSettings, getCombos, getApiKeyByKey } from "@/lib/localDb";
 import { AI_PROVIDERS, resolveProviderId } from "@/shared/constants/providers.js";
 import { handleFetchCore } from "open-sse/handlers/fetch/index.js";
 import { readBodyWithLimit } from "../utils/bodyLimiter.js";
@@ -16,6 +16,7 @@ import * as log from "../utils/logger.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { handleComboChat, getComboModelsFromData } from "open-sse/services/combo.js";
 import { assertPublicUrl } from "@/shared/utils/ssrfGuard.js";
+import { assertModelAllowed } from "../utils/modelAccess.js";
 
 /**
  * Handle web fetch (URL extraction) request for the SSE/Next.js server.
@@ -101,6 +102,13 @@ export async function handleFetch(request) {
   } catch (err) {
     log.warn("FETCH", "Blocked URL", { url: targetUrl });
     return errorResponse(HTTP_STATUS.BAD_REQUEST, err.message);
+  }
+
+  // ACL: enforce per-key model access (hot path, mirrors handleChat)
+  if (apiKey) {
+    const keyObj = await getApiKeyByKey(apiKey).catch(() => null);
+    const denied = assertModelAllowed(keyObj, providerInput);
+    if (denied) return denied;
   }
 
   // Combo expansion: providerInput may be a combo name → run fallback/round-robin across providers

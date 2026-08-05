@@ -1,7 +1,6 @@
 import { getModelInfo } from "./model.js";
 import { normalizeComboStrategyConfig, estimateLogicalCalls } from "open-sse/services/comboConfig.js";
-
-const allowedByRule = (allowed, model) => allowed.some((rule) => rule === model || (rule.endsWith("/") && model.startsWith(rule)));
+import { allowedByRule } from "../utils/modelAccess.js";
 
 export async function buildComboExecutionGraph(combo, legacyConfig = {}) {
   const members = Array.isArray(combo?.models) ? [...combo.models] : [];

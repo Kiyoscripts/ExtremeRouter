@@ -5,7 +5,7 @@ import {
   extractApiKey,
   isValidApiKey,
 } from "../services/auth.js";
-import { getSettings, getCombos } from "@/lib/localDb";
+import { getSettings, getCombos, getApiKeyByKey } from "@/lib/localDb";
 import { AI_PROVIDERS, resolveProviderId } from "@/shared/constants/providers.js";
 import { handleSearchCore } from "open-sse/handlers/search/index.js";
 import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
@@ -13,6 +13,7 @@ import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import * as log from "../utils/logger.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { handleComboChat, getComboModelsFromData } from "open-sse/services/combo.js";
+import { assertModelAllowed } from "../utils/modelAccess.js";
 
 /**
  * Handle web search request for the SSE/Next.js server.
@@ -66,6 +67,13 @@ export async function handleSearch(request) {
   if (!query || typeof query !== "string" || !query.trim()) {
     log.warn("SEARCH", "Missing query");
     return errorResponse(HTTP_STATUS.BAD_REQUEST, "Missing required field: query");
+  }
+
+  // ACL: enforce per-key model access (hot path, mirrors handleChat)
+  if (apiKey) {
+    const keyObj = await getApiKeyByKey(apiKey).catch(() => null);
+    const denied = assertModelAllowed(keyObj, providerInput);
+    if (denied) return denied;
   }
 
   // Combo expansion: providerInput may be a combo name → run fallback/round-robin across providers

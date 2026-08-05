@@ -11,6 +11,7 @@ import { cacheClaudeHeaders } from "open-sse/utils/claudeHeaderCache.js";
 import { readBodyWithLimit } from "../utils/bodyLimiter.js";
 import { checkRateLimit, evictExpiredBuckets } from "../utils/rateLimiter.js";
 import { getSettings, getApiKeyByKey, getComboByName } from "@/lib/localDb";
+import { assertModelAllowed } from "../utils/modelAccess.js";
 import { getModelInfo } from "../services/model.js";
 import { handleChatCore } from "open-sse/handlers/chatCore.js";
 import { DEFAULT_HEADROOM_URL } from "@/lib/headroom/detect";
@@ -76,7 +77,7 @@ async function dispatchComboByName(modelStr, { body, clientRawRequest, request, 
     const abort = () => runController.abort(request.signal?.reason || new Error("client disconnected"));
     if (request.signal?.aborted) abort(); else request.signal?.addEventListener("abort", abort, { once: true });
     try {
-      const response = await dispatchResolvedCombo({ body, graph, clientRawRequest, request, apiKey, settings, signal: runController.signal, budget, principalId: keyObj?.id || "local" });
+      const response = await dispatchResolvedCombo({ body, graph, clientRawRequest, request, apiKey, settings, signal: runController.signal, budget, principalId: keyObj?.id || "local", keyObj });
       return wrapResponseWithAdmission(response, lease);
     } catch (error) {
       lease.release();
@@ -204,10 +205,9 @@ export async function handleChat(request, clientRawRequest = null) {
     return await dispatchComboByName(modelStr, { body, clientRawRequest, request, apiKey, settings, keyObj, rateLimitKey });
   }
 
-  if (keyObj && Array.isArray(keyObj.allowedModels) && keyObj.allowedModels.length > 0) {
-    const allowed = keyObj.allowedModels.some((m) => m === modelStr || (m.endsWith("/") && modelStr.startsWith(m)));
-    if (!allowed) return errorResponse(HTTP_STATUS.FORBIDDEN, `Model "${modelStr}" is not allowed for this API key`);
-  }
+  // ACL: enforce per-key model access via shared helper
+  const denied = assertModelAllowed(keyObj, modelStr);
+  if (denied) return denied;
   return handleSingleModelChat(body, modelStr, clientRawRequest, request, apiKey);
 }
 
@@ -248,7 +248,7 @@ function resolveThinkingForComboRole(comboThinking, role) {
   return comboThinking;
 }
 
-async function dispatchResolvedCombo({ body, graph, clientRawRequest, request, apiKey, settings, signal, budget, principalId }) {
+async function dispatchResolvedCombo({ body, graph, clientRawRequest, request, apiKey, settings, signal, budget, principalId, keyObj }) {
   const { comboName, config, members } = graph;
   const strategy = config.fallbackStrategy;
   const comboThinking = config?.thinking;
@@ -273,6 +273,7 @@ async function dispatchResolvedCombo({ body, graph, clientRawRequest, request, a
       signal: opts.signal,
       trafficClass: opts.trafficClass || (opts.isPanel ? "panel" : "user"),
       thinking: effectiveThinking,
+      keyObj,
     });
   };
 

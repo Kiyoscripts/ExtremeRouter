@@ -5,7 +5,7 @@ import {
   extractApiKey,
   isValidApiKey,
 } from "../services/auth.js";
-import { getSettings } from "@/lib/localDb";
+import { getSettings, getApiKeyByKey } from "@/lib/localDb";
 import { getModelInfo } from "../services/model.js";
 import { handleEmbeddingsCore } from "open-sse/handlers/embeddingsCore.js";
 import { readBodyWithLimit } from "../utils/bodyLimiter.js";
@@ -14,6 +14,7 @@ import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import * as log from "../utils/logger.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
+import { assertModelAllowed } from "../utils/modelAccess.js";
 
 /**
  * Handle embeddings request for the SSE/Next.js server.
@@ -74,6 +75,13 @@ export async function handleEmbeddings(request) {
   if (!modelStr) {
     log.warn("EMBEDDINGS", "Missing model");
     return errorResponse(HTTP_STATUS.BAD_REQUEST, "Missing model");
+  }
+
+  // ACL: enforce per-key model access (hot path, mirrors handleChat)
+  if (apiKey) {
+    const keyObj = await getApiKeyByKey(apiKey).catch(() => null);
+    const denied = assertModelAllowed(keyObj, modelStr);
+    if (denied) return denied;
   }
 
   if (!body.input) {
