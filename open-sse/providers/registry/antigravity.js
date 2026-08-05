@@ -1,5 +1,6 @@
 import { platform, arch } from "os";
 import { ANTIGRAVITY_OAUTH_CLIENT } from "../shared.js";
+import { ANTIGRAVITY_IDE_USER_AGENT } from "../../config/appConstants.js";
 
 export default {
   id: "antigravity",
@@ -81,8 +82,7 @@ export default {
     apiVersion: "v1internal",
     loadCodeAssistEndpoint: "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist",
     onboardUserEndpoint: "https://cloudcode-pa.googleapis.com/v1internal:onboardUser",
-    loadCodeAssistUserAgent: "google-api-nodejs-client/9.15.1",
-    loadCodeAssistApiClient: "google-cloud-sdk vscode_cloudshelleditor/0.1",
+    loadCodeAssistUserAgent: ANTIGRAVITY_IDE_USER_AGENT,
     refreshLeadMs: 300000,
   },
   features: {
