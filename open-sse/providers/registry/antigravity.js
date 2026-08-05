@@ -1,6 +1,10 @@
 import { platform, arch } from "os";
 import { ANTIGRAVITY_OAUTH_CLIENT } from "../shared.js";
-import { ANTIGRAVITY_IDE_USER_AGENT } from "../../config/appConstants.js";
+
+// Value matches ANTIGRAVITY_IDE_USER_AGENT in config/appConstants.js.
+// Duped here deliberately: importing from config/appConstants.js would create
+// a registry → appConstants → providers/index → registry cycle.
+const ANTIGRAVITY_IDE_USER_AGENT = "google-api-nodejs-client/9.15.1";
 
 export default {
   id: "antigravity",
