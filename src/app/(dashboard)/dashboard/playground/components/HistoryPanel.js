@@ -35,7 +35,7 @@ export default function HistoryPanel({ sessions, currentSession, onNew, onLoad, 
     <div className="flex flex-col gap-2 rounded-brand border border-border-subtle bg-panel p-3">
       <div className="flex items-center justify-between">
         <span className="text-xs font-semibold uppercase tracking-wide text-text-muted">History</span>
-        <Button size="sm" variant="ghost" icon="add" onClick={onNew} title="New chat" />
+        <Button size="sm" variant="ghost" icon="add" onClick={onNew} title="New chat" aria-label="New chat" />
       </div>
       {sessions.length > 0 && (
         <div className="flex items-center gap-1.5 rounded-lg border border-border-subtle bg-surface-2 px-2">
@@ -72,6 +72,7 @@ export default function HistoryPanel({ sessions, currentSession, onNew, onLoad, 
                 onClick={() => onDelete(s.id)}
                 className="rounded p-1 text-text-muted opacity-0 hover:text-danger group-hover:opacity-100"
                 title="Delete"
+                aria-label={`Delete ${s.title}`}
               >
                 <span className="material-symbols-outlined text-[14px]">delete</span>
               </button>

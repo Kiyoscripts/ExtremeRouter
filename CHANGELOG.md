@@ -1,3 +1,17 @@
+# v0.8.2 (2026-08-05)
+
+## Features
+- **New Provider: Pro API**: Gemini CLI Pro subscription provider, supports Gemini 3, Qwen, GPT-5.3, Claude Sonnet 4.6/Opus 4.6.
+- **New Provider: Novita AI**: API-key provider with 9 models (GLM 5.1, Qwen3.5 397B, Kimi K2.5, DeepSeek V3.2/R1, MiniMax M2.5, GLM 5 Air, Hermes 4). Passthrough mode.
+- **New Provider: GLM Custom**: free-tier user agent GLM proxy.
+
+## Fixes
+- **Provider Registry**: drive CapabilityValues defaults from capabilities object, fix `requiresValidateUrl` propagation so OpenRouter-style providers align with keygen modal.
+- **Login Flow**: fix endless login loop.
+- **Pool Cache**: reduce cache duration for `pool:last-selection` to 5s.
+- **Combos**: fix custom strategies missing `members`, add priority auto-assignment for newly detected providers.
+- **Security**: redact password in error log.
+
 # v0.8.0 (2026-07-29)
 
 ## Features

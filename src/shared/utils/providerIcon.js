@@ -12,7 +12,7 @@
 import { OPENAI_COMPATIBLE_PREFIX, ANTHROPIC_COMPATIBLE_PREFIX } from "@/shared/constants/providers";
 
 // Providers whose brand icon is a vector SVG (not PNG).
-// MUST stay in sync with public/providers/*.svg (currently 34 files).
+// MUST stay in sync with public/providers/*.svg (currently 63 files).
 // When adding a new .svg asset, add its id here too.
 export const SVG_ICON_IDS = new Set([
   "windsurf", "trae", "cody", "kimchi",
@@ -25,6 +25,8 @@ export const SVG_ICON_IDS = new Set([
   "devin", "forge", "tokenrouter",
   "qwen-cloud", "alibaba", "alibaba-cn", "hcnsec",
   "cline", "clinepass", "grok-web", "inxorastudio", "inxorastudio-web", "bynara", "infron", "1min", "zed", "wp-studio", "agnes-web", "agnes-api", "stepfun",
+  "unimodel",
+  "1min-api", "deepinfra", "codestral", "databricks", "venice", "vercel-ai-gateway", "marathon", "qwen2api",
 ]);
 
 /**

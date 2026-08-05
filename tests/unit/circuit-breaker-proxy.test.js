@@ -11,6 +11,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
   breakerKey, isCircuitOpen, isBreakerBlocking,
   recordBreakerFailure, recordBreakerSuccess, resetBreaker, getBreakerStates,
+  releaseBreakerProbe,
 } from "open-sse/services/circuitBreaker.js";
 
 const SETTINGS = {
@@ -103,5 +104,44 @@ describe("getBreakerStates + resetBreaker", () => {
     resetBreaker("testprov"); // no key → reset all variants
     expect(isCircuitOpen("testprov", SETTINGS, keyA)).toBe(false);
     expect(isCircuitOpen("testprov", SETTINGS, keyB)).toBe(false);
+  });
+});
+
+// P0 regression: a request that passes the half-open gate (claims the single
+// probe slot) but bails early — e.g. chat.js early-returns for no-credentials /
+// all-rate-limited — MUST release the slot, or the breaker wedges at capacity
+// until process restart. This pins the mechanism the chat.js fix relies on.
+describe("half-open probe slot — release leak regression", () => {
+  it("releaseBreakerProbe frees the slot so a wedged half-open breaker recovers", async () => {
+    const SHORT_COOLDOWN = {
+      circuitBreaker: {
+        enabled: true,
+        failureThreshold: 3,
+        windowMs: 60000,
+        cooldownMs: 2, // let OPEN→HALF_OPEN happen almost immediately
+        halfOpenMaxCalls: 1,
+      },
+    };
+
+    // Trip the breaker → OPEN.
+    for (let i = 0; i < 3; i++) recordBreakerFailure("testprov", 503, SHORT_COOLDOWN);
+    expect(isBreakerBlocking("testprov", SHORT_COOLDOWN)).toBe(true);
+
+    // Wait for cooldown to elapse so the next check transitions OPEN → HALF_OPEN.
+    await new Promise((r) => setTimeout(r, 20));
+
+    // Request A: half-open with capacity → claims the slot, allowed through.
+    expect(isCircuitOpen("testprov", SHORT_COOLDOWN)).toBe(false);
+    // Request B: the slot is still in flight → blocked at capacity (wedge).
+    expect(isCircuitOpen("testprov", SHORT_COOLDOWN)).toBe(true);
+
+    // Request A bails before handling (no success/failure recorded) → release.
+    releaseBreakerProbe("testprov");
+
+    // The next request can claim the slot again — breaker is NOT wedged.
+    expect(isCircuitOpen("testprov", SHORT_COOLDOWN)).toBe(false);
+
+    // Clean up so the shared provider state doesn't linger for later tests.
+    resetBreaker("testprov");
   });
 });

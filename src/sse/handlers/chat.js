@@ -11,7 +11,7 @@ import { cacheClaudeHeaders } from "open-sse/utils/claudeHeaderCache.js";
 import { readBodyWithLimit } from "../utils/bodyLimiter.js";
 import { checkRateLimit, evictExpiredBuckets } from "../utils/rateLimiter.js";
 import { getSettings, getApiKeyByKey, getComboByName } from "@/lib/localDb";
-import { getModelInfo, getComboModels } from "../services/model.js";
+import { getModelInfo } from "../services/model.js";
 import { handleChatCore } from "open-sse/handlers/chatCore.js";
 import { DEFAULT_HEADROOM_URL } from "@/lib/headroom/detect";
 import { getPxpipeDir } from "@/lib/pxpipe/manager.js";
@@ -29,16 +29,65 @@ import { buildComboExecutionGraph, authorizeComboExecution } from "../services/c
 import { acquireComboAdmission, wrapResponseWithAdmission } from "../services/comboAdmission.js";
 import { createComboBudget } from "open-sse/services/comboBudget.js";
 
-// M2 FIX: normalize a combo strategy string to a known value. Accepts case
-// variants + surrounding whitespace ("FUSION", "Round-Robin ", " Swarm ") and
-// maps unknown values to "fallback" so a typo or client-injected junk never
-// silently mis-dispatches. The previous exact-case compares meant "FUSION"
-// fell through to handleComboChat as plain fallback with no indication.
-const KNOWN_STRATEGIES = new Set(["fallback", "round-robin", "fusion", "swarm", "cascade"]);
-function normalizeStrategy(raw) {
-  if (typeof raw !== "string") return "fallback";
-  const s = raw.trim().toLowerCase();
-  return KNOWN_STRATEGIES.has(s) ? s : "fallback";
+/**
+ * P0 (combos): single gated path for dispatching a combo by name. Both the
+ * top-level request handler and the single-model fallback route through here so
+ * EVERY combo fan-out is subject to:
+ *   1. per-key model ACL (authorizeComboExecution),
+ *   2. per-key logical-call rate limit charge for the expansion,
+ *   3. combo budget (cost/output-char caps),
+ *   4. combo admission (concurrency semaphore).
+ *
+ * Returns the final Response when `modelStr` is a combo, or `null` when it is
+ * not (so callers fall through to normal single-model handling).
+ */
+async function dispatchComboByName(modelStr, { body, clientRawRequest, request, apiKey, settings, keyObj, rateLimitKey }) {
+  if (modelStr.includes("/")) return null; // explicit provider/model ids are never combos
+  const combo = await getComboByName(modelStr);
+  if (!combo?.models?.length) return null;
+
+  try {
+    const graph = await buildComboExecutionGraph(combo, settings.comboStrategies?.[modelStr]);
+    const authz = authorizeComboExecution(keyObj, graph);
+    if (!authz.allowed) {
+      log.warn("AUTH", `Combo "${modelStr}" denied expanded models: ${authz.denied.join(", ")}`);
+      return errorResponse(HTTP_STATUS.FORBIDDEN, `Combo execution includes models not allowed for this API key: ${authz.denied.join(", ")}`);
+    }
+
+    // One token was charged before resolution. Charge the remaining expansion
+    // cost atomically before any provider call.
+    if (graph.logicalCalls > 1) {
+      const expansionLimit = checkRateLimit(rateLimitKey, undefined, undefined, graph.logicalCalls - 1);
+      if (!expansionLimit.allowed) return errorResponse(HTTP_STATUS.TOO_MANY_REQUESTS, "Combo rate limit exceeded");
+    }
+
+    const budget = createComboBudget({ body, config: graph.config, leaves: graph.leaves, logicalCalls: graph.logicalCalls });
+    if (!budget.ok) return errorResponse(HTTP_STATUS.BAD_REQUEST, `Combo budget rejected: ${budget.code}`);
+
+    const lease = acquireComboAdmission(keyObj?.id || rateLimitKey);
+    if (!lease.ok) {
+      return new Response(JSON.stringify({ error: { message: "Combo capacity unavailable", code: lease.code } }), {
+        status: lease.status,
+        headers: { "Content-Type": "application/json", "Retry-After": String(lease.retryAfter) },
+      });
+    }
+
+    const runController = new AbortController();
+    const abort = () => runController.abort(request.signal?.reason || new Error("client disconnected"));
+    if (request.signal?.aborted) abort(); else request.signal?.addEventListener("abort", abort, { once: true });
+    try {
+      const response = await dispatchResolvedCombo({ body, graph, clientRawRequest, request, apiKey, settings, signal: runController.signal, budget, principalId: keyObj?.id || "local" });
+      return wrapResponseWithAdmission(response, lease);
+    } catch (error) {
+      lease.release();
+      throw error;
+    } finally {
+      request.signal?.removeEventListener("abort", abort);
+    }
+  } catch (error) {
+    log.warn("COMBO", `Combo resolution failed: ${error?.message || error}`);
+    return errorResponse(HTTP_STATUS.BAD_REQUEST, error?.message || "Invalid combo configuration");
+  }
 }
 
 /**
@@ -148,47 +197,11 @@ export async function handleChat(request, clientRawRequest = null) {
 
   const combo = !modelStr.includes("/") ? await getComboByName(modelStr) : null;
   if (combo?.models?.length) {
-    try {
-      const graph = await buildComboExecutionGraph(combo, settings.comboStrategies?.[modelStr]);
-      const authz = authorizeComboExecution(keyObj, graph);
-      if (!authz.allowed) {
-        log.warn("AUTH", `Combo "${modelStr}" denied expanded models: ${authz.denied.join(", ")}`);
-        return errorResponse(HTTP_STATUS.FORBIDDEN, `Combo execution includes models not allowed for this API key: ${authz.denied.join(", ")}`);
-      }
-
-      // One token was charged before resolution. Charge the remaining expansion
-      // cost atomically before any provider call.
-      if (graph.logicalCalls > 1) {
-        const expansionLimit = checkRateLimit(rateLimitKey, undefined, undefined, graph.logicalCalls - 1);
-        if (!expansionLimit.allowed) return errorResponse(HTTP_STATUS.TOO_MANY_REQUESTS, "Combo rate limit exceeded");
-      }
-
-      const budget = createComboBudget({ body, config: graph.config, leaves: graph.leaves, logicalCalls: graph.logicalCalls });
-      if (!budget.ok) return errorResponse(HTTP_STATUS.BAD_REQUEST, `Combo budget rejected: ${budget.code}`);
-
-      const lease = acquireComboAdmission(keyObj?.id || rateLimitKey);
-      if (!lease.ok) {
-        return new Response(JSON.stringify({ error: { message: "Combo capacity unavailable", code: lease.code } }), {
-          status: lease.status,
-          headers: { "Content-Type": "application/json", "Retry-After": String(lease.retryAfter) },
-        });
-      }
-      const runController = new AbortController();
-      const abort = () => runController.abort(request.signal?.reason || new Error("client disconnected"));
-      if (request.signal?.aborted) abort(); else request.signal?.addEventListener("abort", abort, { once: true });
-      try {
-        const response = await dispatchResolvedCombo({ body, graph, clientRawRequest, request, apiKey, settings, signal: runController.signal, budget, principalId: keyObj?.id || "local" });
-        return wrapResponseWithAdmission(response, lease);
-      } catch (error) {
-        lease.release();
-        throw error;
-      } finally {
-        request.signal?.removeEventListener("abort", abort);
-      }
-    } catch (error) {
-      log.warn("COMBO", `Combo resolution failed: ${error?.message || error}`);
-      return errorResponse(HTTP_STATUS.BAD_REQUEST, error?.message || "Invalid combo configuration");
-    }
+    // P0: every combo name now resolves through the single gated path
+    // (dispatchComboByName: authorize + logical-call charge + budget + admission).
+    // Kept via the shared helper so top-level and nested/legacy lookups cannot
+    // fan out without authorization.
+    return await dispatchComboByName(modelStr, { body, clientRawRequest, request, apiKey, settings, keyObj, rateLimitKey });
   }
 
   if (keyObj && Array.isArray(keyObj.allowedModels) && keyObj.allowedModels.length > 0) {
@@ -334,74 +347,22 @@ async function dispatchResolvedCombo({ body, graph, clientRawRequest, request, a
 async function handleSingleModelChat(body, modelStr, clientRawRequest = null, request = null, apiKey = null, opts = {}) {
   const modelInfo = await getModelInfo(modelStr);
 
-  // If provider is null, this might be a combo name - check and handle
+  // If provider is null, this might be a combo name (e.g. a nested combo whose
+  // member is itself a combo name). P0: route through the same gated path as the
+  // top-level handler so the fan-out is authorized, rate-limited, budgeted, and
+  // admitted — never the old unguarded dispatch.
   if (!modelInfo.provider) {
-    const comboModels = await getComboModels(modelStr);
-    if (comboModels) {
-      const chatSettings = await getSettings();
-      // Check for combo-specific strategy first, fallback to global
-      const comboStrategies = chatSettings.comboStrategies || {};
-      const comboSpecificStrategy = comboStrategies[modelStr]?.fallbackStrategy;
-      const comboStrategy = normalizeStrategy(comboSpecificStrategy || chatSettings.comboStrategy || "fallback");
-
-      if (comboStrategy === "fusion") {
-        log.info("CHAT", `Combo "${modelStr}" with ${comboModels.length} models (strategy: fusion)`);
-        return handleFusionChat({
-          body,
-          models: comboModels,
-          handleSingleModel: (b, m, isPanel) => {
-            let cleanRawReq = clientRawRequest;
-            if (isPanel && clientRawRequest) {
-              const { tools, tool_choice, ...cleanBody } = clientRawRequest.body || {};
-              cleanRawReq = { ...clientRawRequest, body: cleanBody };
-            }
-            return handleSingleModelChat(b, m, cleanRawReq, request, apiKey, { skipBreaker: isPanel });
-          },
-          log,
-          comboName: modelStr,
-          judgeModel: comboStrategies[modelStr]?.judgeModel,
-          tuning: comboStrategies[modelStr]?.fusionTuning,
-        });
-      }
-
-      const comboStickyLimit = chatSettings.comboStickyRoundRobinLimit;
-      if (comboStrategy === "swarm") {
-        log.info("CHAT", `Combo "${modelStr}" with ${comboModels.length} models (strategy: swarm)`);
-        const swarmCfg = comboStrategies[modelStr] || {};
-        return handleSwarmChat({
-          body,
-          models: comboModels,
-          handleSingleModel: (b, m, isPanel) => {
-            let cleanRawReq = clientRawRequest;
-            if (isPanel && clientRawRequest) {
-              const { tools, tool_choice, ...cleanBody } = clientRawRequest.body || {};
-              cleanRawReq = { ...clientRawRequest, body: cleanBody };
-            }
-            return handleSingleModelChat(b, m, cleanRawReq, request, apiKey, { skipBreaker: isPanel });
-          },
-          log,
-          comboName: modelStr,
-          managerModel: swarmCfg.managerModel,
-          staffModel: swarmCfg.staffModel,
-          auditModel: swarmCfg.auditModel,
-          workerCount: swarmCfg.workerCount,
-          swarmTuning: swarmCfg.swarmTuning,
-          telemetry: swarmCfg.enableTelemetry !== false,
-        });
-      }
-
-      log.info("CHAT", `Combo "${modelStr}" with ${comboModels.length} models (strategy: ${comboStrategy}, sticky: ${comboStickyLimit})`);
-      return handleComboChat({
-        body,
-        models: comboModels,
-        handleSingleModel: (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey),
-        log,
-        comboName: modelStr,
-        comboStrategy,
-        comboStickyLimit,
-        breakerSettings: chatSettings,
-      });
-    }
+    const settings = await getSettings();
+    const gated = await dispatchComboByName(modelStr, {
+      body,
+      clientRawRequest,
+      request,
+      apiKey,
+      settings,
+      keyObj: opts.keyObj || null,          // panel workers: null (already authorized at top level)
+      rateLimitKey: opts.principalId || opts.rateLimitKey || "local",
+    });
+    if (gated) return gated;
     log.warn("CHAT", "Invalid model format", { model: modelStr });
     return errorResponse(HTTP_STATUS.BAD_REQUEST, "Invalid model format");
   }
@@ -443,17 +404,27 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
         // No model attempt ran on this path (every account is rate-limited), so
         // model latency is 0 — consistent with the other early-exit samples below.
         recordHealthSample(provider, { success: false, latencyMs: 0, status }, chatSettings);
+        // P0 probe-leak fix: getProviderCredentials may have claimed a half-open
+        // probe slot (free no-auth providers claim the provider-level key in
+        // auth.js:94). This path returns BEFORE handleChatCore, so release the
+        // slot explicitly or the breaker wedges at half-open capacity forever.
+        releaseBreakerProbe(provider);
         return unavailableResponse(status, `[${provider}/${model}] ${errorMsg}`, credentials.retryAfter, credentials.retryAfterHuman);
       }
       if (excludeConnectionIds.size === 0) {
         log.warn("AUTH", `No active credentials for provider: ${provider}`);
         // C3 fix: record failure sample.
         recordHealthSample(provider, { success: false, latencyMs: 0, status: 404 }, chatSettings);
+        // P0 probe-leak fix: release any half-open slot claimed during credential
+        // resolution (free no-auth provider path) before this early return.
+        releaseBreakerProbe(provider);
         return errorResponse(HTTP_STATUS.NOT_FOUND, `No active credentials for provider: ${provider}`);
       }
       log.warn("CHAT", "No more accounts available", { provider });
       // C3 fix: record failure sample.
       recordHealthSample(provider, { success: false, latencyMs: 0, status: lastStatus || 503 }, chatSettings);
+      // P0 probe-leak fix: same as above — guarantee the claimed slot is released.
+      releaseBreakerProbe(provider);
       return errorResponse(lastStatus || HTTP_STATUS.SERVICE_UNAVAILABLE, lastError || "All accounts unavailable");
     }
 

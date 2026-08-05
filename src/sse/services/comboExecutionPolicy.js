@@ -5,18 +5,20 @@ const allowedByRule = (allowed, model) => allowed.some((rule) => rule === model 
 
 export async function buildComboExecutionGraph(combo, legacyConfig = {}) {
   const members = Array.isArray(combo?.models) ? [...combo.models] : [];
-  // Strategy resolution order:
-  //   1. legacyConfig (settings.comboStrategies[comboName]) — the location the
-  //      ComboCard strategy editor writes to. It is the user's live override.
-  //   2. combo.strategyConfig — the persisted combo definition. This is ALWAYS
-  //      non-empty (create fills in normalized defaults), so it must NOT take
-  //      precedence over a settings override — otherwise editing strategy in
-  //      the UI appears to "not stick" (dispatch keeps using the stale default).
-  const config = normalizeComboStrategyConfig(
-    legacyConfig && typeof legacyConfig === "object" && Object.keys(legacyConfig).length
-      ? legacyConfig
-      : combo?.strategyConfig,
-  );
+  // Strategy resolution: MERGE, not pick-one.
+  //   base: combo.strategyConfig — the persisted combo definition (always
+  //     non-empty: create fills in normalized defaults).
+  //   override: legacyConfig (settings.comboStrategies[comboName]) — the
+  //     location the ComboCard editor writes to (live user changes).
+  // Settings fields win field-by-field. This avoids two bugs:
+  //   - picking combo.strategyConfig only → UI edits "don't stick" (Fusion
+  //     shown as fallback);
+  //   - picking settings entry only → a partial entry ({ thinking } only,
+  //     written when the user changes thinking without touching strategy)
+  //     silently resets the strategy to fallback.
+  const base = combo?.strategyConfig && typeof combo?.strategyConfig === "object" ? combo.strategyConfig : {};
+  const override = legacyConfig && typeof legacyConfig === "object" ? legacyConfig : {};
+  const config = normalizeComboStrategyConfig({ ...base, ...override });
   const first = members[0] || "";
   const roleModels = config.fallbackStrategy === "fusion"
     ? { judge: config.judgeModel || first }

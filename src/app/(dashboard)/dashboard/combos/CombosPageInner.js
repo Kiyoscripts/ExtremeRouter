@@ -155,6 +155,40 @@ export default function CombosPageInner() {
       const hadConfig = Object.keys(current).some((k) => k !== "fallbackStrategy" && current[k] != null && current[k] !== "");
       const hasExtraConfig = Object.keys(next).some((k) => k !== "fallbackStrategy");
       const isDelete = next.fallbackStrategy === "fallback" && hadConfig && !hasExtraConfig;
+
+      // P1: validate control-role models BEFORE persisting. The settings PATCH
+      // is a generic deep-merge with no combo-aware validation, so without this
+      // a web-cookie provider can be silently saved as manager/judge — which the
+      // runtime would then reject with an opaque error.
+      if (!isDelete && (next.fallbackStrategy === "swarm" || next.fallbackStrategy === "fusion")) {
+        const combo = combos.find((c) => c.name === comboName);
+        const panel = combo?.models || [];
+        try {
+          const vRes = await fetch("/api/combos/validate-roles", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              strategy: next.fallbackStrategy,
+              managerModel: next.managerModel,
+              staffModel: next.staffModel,
+              auditModel: next.auditModel,
+              judgeModel: next.judgeModel,
+              panel,
+            }),
+          });
+          if (vRes.ok) {
+            const vData = await vRes.json();
+            if (!vData.valid && Array.isArray(vData.violations) && vData.violations.length > 0) {
+              const msg = vData.violations.map((v) => `${v.role}: ${v.reason}`).join("\n");
+              alert(`Cannot save strategy — invalid role models:\n\n${msg}`);
+              return;
+            }
+          }
+        } catch {
+          // validation endpoint unreachable — don't block save (fail-open UX)
+        }
+      }
+
       // null is the backend's delete-signal (see settingsRepo deep-merge).
       const payload = { comboStrategies: { [comboName]: isDelete ? null : next } };
 

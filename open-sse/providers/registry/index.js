@@ -153,6 +153,9 @@ import p151 from "./stepfun.js";
 import p152 from "./deepinfra.js";
 import p153 from "./codestral.js";
 import p154 from "./databricks.js";
+import p155 from "./unimodel.js";
+import p156 from "./inferx.js";
+import p157 from "./novita.js";
 
 export default [
   p0,
@@ -309,4 +312,7 @@ export default [
   p152,
   p153,
   p154,
+  p155,
+  p156,
+  p157,
 ];

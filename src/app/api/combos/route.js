@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getCombos, createCombo, getComboByName } from "@/lib/localDb";
 import { validateComboDefinition } from "open-sse/services/comboConfig.js";
 import { validateComboRoles } from "open-sse/services/providerCapabilities.js";
+import { validateContextLength } from "./[id]/route.js";
 
 export const dynamic = "force-dynamic";
 
@@ -17,11 +18,22 @@ export async function GET() {
 export async function POST(request) {
   try {
     const body = await request.json();
+    const { name, models, kind, context_length } = body;
+
+    // Validate context_length if provided (positive int, within bound)
+    let contextLength = null;
+    if ("context_length" in body && body.context_length !== undefined && body.context_length !== null) {
+      const v = validateContextLength(body.context_length);
+      if (!v.ok) return NextResponse.json({ error: v.error }, { status: 400 });
+      contextLength = v.value;
+    }
+
     const candidate = {
-      name: typeof body.name === "string" ? body.name.trim() : body.name,
-      models: Array.isArray(body.models) ? body.models.map((m) => typeof m === "string" ? m.trim() : m) : body.models,
-      kind: body.kind || "llm",
+      name: typeof name === "string" ? name.trim() : name,
+      models: Array.isArray(models) ? models.map((m) => typeof m === "string" ? m.trim() : m) : models,
+      kind: kind || "llm",
       strategyConfig: body.strategyConfig || {},
+      context_length: contextLength,
     };
     const validation = validateComboDefinition(candidate);
     if (!validation.valid) return NextResponse.json({ error: validation.errors[0], errors: validation.errors }, { status: 400 });

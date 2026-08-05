@@ -248,6 +248,14 @@ export const CLI_TOOLS = {
     description: "Kilo Code AI Assistant",
     configType: "custom",
   },
+  kimchi: {
+    id: "kimchi",
+    name: "Kimchi CLI",
+    image: "/providers/kimchi.png",
+    color: "#E85D3F",
+    description: "Kimchi CLI — terminal AI coding agent",
+    configType: "custom",
+  },
   roo: {
     id: "roo",
     name: "Roo",

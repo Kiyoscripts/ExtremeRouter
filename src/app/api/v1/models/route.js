@@ -290,6 +290,11 @@ export async function buildModelsList(kindFilter) {
     if (combo.kind === "webSearch" || combo.kind === "webFetch") {
       entry.kind = combo.kind;
     }
+    // Advertise configured context_length to clients (e.g. Cline/Roo).
+    // null = unlimited / unset -> omit field entirely.
+    if (Number.isInteger(combo.context_length) && combo.context_length > 0) {
+      entry.context_length = combo.context_length;
+    }
     models.push(entry);
   }
 

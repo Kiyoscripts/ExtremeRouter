@@ -14,6 +14,7 @@ import { EventEmitter } from "node:events";
 // At 1 req/sec over 5 min = 300 samples — cap of 500 covers that comfortably.
 // At 10 req/sec over 5 min = 3000 — cap prevents memory blowup.
 const MAX_SAMPLES_BASE = 200;
+const MAX_SAMPLES_CAP = 2000;
 const MAX_SAMPLES_PER_MS = MAX_SAMPLES_BASE / 300000; // base rate per ms (200 per 5 min)
 
 if (!global._healthMonitors) {
@@ -29,6 +30,12 @@ const HEALTH_DEFAULTS = {
   windowMs: 300000, // 5 min
 };
 
+// A4: sample cap scaled to the window, bounded to [MAX_SAMPLES_BASE, MAX_SAMPLES_CAP]
+// (nearest-rank slice later enforces the actual bound).
+function computeMaxSamples(wMs) {
+  return Math.min(MAX_SAMPLES_CAP, Math.max(MAX_SAMPLES_BASE, Math.ceil(MAX_SAMPLES_PER_MS * wMs * 5)));
+}
+
 function getOrCreate(provider, windowMs) {
   let m = monitors.get(provider);
   const wMs = windowMs || HEALTH_DEFAULTS.windowMs;
@@ -40,13 +47,21 @@ function getOrCreate(provider, windowMs) {
       // Co-lifecycle'd state (C2 fix: prevents unbounded module-level objects).
       emitTimer: null,
       lastSuccessRate: undefined,
-      // Dynamic sample cap scaled to window size (H1 fix).
-      maxSamples: Math.max(MAX_SAMPLES_BASE, Math.ceil(MAX_SAMPLES_PER_MS * wMs * 5)),
+      // A3 GC: last activity — used to evict idle monitor entries.
+      lastActivityAt: Date.now(),
+      // Dynamic sample cap scaled to window size (H1 fix), capped (A4).
+      maxSamples: computeMaxSamples(wMs),
       // M1 fix: cached aggregate — invalidated on every new sample.
       cachedAggregate: null,
       cachedAt: 0,
     };
     monitors.set(provider, m);
+  } else if (m.windowMs !== wMs) {
+    // A4: config is dynamic — re-sync the window and sample cap when settings
+    // change at runtime instead of fixing them at first creation.
+    m.windowMs = wMs;
+    m.maxSamples = computeMaxSamples(wMs);
+    m.cachedAggregate = null; // window changed → stale aggregate
   }
   return m;
 }
@@ -60,6 +75,7 @@ export function recordHealthSample(provider, { success, latencyMs, status, traff
   // Always get-or-create so we can update the enabled flag even when disabled.
   const m = getOrCreate(provider, cfg.windowMs);
   m._enabled = cfg.enabled; // M2 fix: track current enabled state
+  m.lastActivityAt = Date.now(); // A3 GC: any recorded sample counts as activity
 
   if (!cfg.enabled) {
     // Cancel any pending timer so stale events don't fire after disable.
@@ -192,10 +208,30 @@ export function getProviderHealth(provider) {
   return result;
 }
 
+// A3 GC: evict monitor entries idle for GC_IDLE_MS, at most once per
+// GC_INTERVAL_MS (driven by getAllProviderHealth reads, so no extra timer).
+// Safe: an evicted provider simply starts collecting fresh samples again.
+const GC_IDLE_MS = 10 * 60 * 1000; // 10 min
+const GC_INTERVAL_MS = 60 * 1000;  // sweep at most once per minute
+let _lastSweepAt = 0;
+
+function sweepIdleHealth(now) {
+  if (now - _lastSweepAt < GC_INTERVAL_MS) return;
+  _lastSweepAt = now;
+  const cutoff = now - GC_IDLE_MS;
+  for (const [p, m] of monitors) {
+    if ((m.lastActivityAt || 0) < cutoff) {
+      if (m.emitTimer) clearTimeout(m.emitTimer);
+      monitors.delete(p);
+    }
+  }
+}
+
 /**
  * Snapshot all provider health (for dashboard initial load).
  */
 export function getAllProviderHealth() {
+  sweepIdleHealth(Date.now());
   return [...monitors.keys()]
     .map((p) => getProviderHealth(p))
     .filter(Boolean)

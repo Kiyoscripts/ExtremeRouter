@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { PageHeader, SegmentedControl, Button, CardSkeleton } from "@/shared/components";
+import { PageHeader, SegmentedControl, Button, CardSkeleton, ConfirmModal, Modal } from "@/shared/components";
 import ModelPicker from "./components/ModelPicker";
 import ParameterPanel from "./components/ParameterPanel";
 import StatsBar from "./components/StatsBar";
@@ -40,8 +40,50 @@ function loadSessions() {
   } catch { return []; }
 }
 
+// #19/B2: bound what we persist so localStorage can't blow out and silently drop
+// sessions. Messages are capped per session, the session count is capped, and on
+// a QuotaExceededError we retry once with heavy inline images stripped.
+const MAX_STORED_MESSAGES = 60;
+const MAX_SESSIONS = 100;
+
+// Clone sessions and drop the heavy inline image `dataUrl` payloads so a few
+// image chats can't keep a session over the ~5MB localStorage limit forever.
+function stripAttachmentPayload(sessions) {
+  return sessions.map((s) => ({
+    ...s,
+    messages: (s.messages || []).map((m) => {
+      if (m.role !== "user") return m;
+      return {
+        ...m,
+        displayAttachments: Array.isArray(m.displayAttachments)
+          ? m.displayAttachments.map((a) => ({ id: a.id, name: a.name, stripped: true }))
+          : undefined,
+        content: Array.isArray(m.content)
+          ? m.content.map((c) =>
+              c && c.type === "image_url"
+                ? { type: "image_url", image_url: { url: "" } }
+                : c
+            )
+          : m.content,
+      };
+    }),
+  }));
+}
+
+// Returns "saved" | "stripped" | "failed" so the UI can surface quota outcomes
+// instead of failing silently.
 function saveSessions(sessions) {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions)); } catch {}
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
+    return "saved";
+  } catch {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(stripAttachmentPayload(sessions)));
+      return "stripped";
+    } catch {
+      return "failed";
+    }
+  }
 }
 
 export default function PlaygroundClient() {
@@ -85,6 +127,29 @@ export default function PlaygroundClient() {
   // Per-stream context: { id → { mode, assistantId, modelId, startTime } }
   // Lets the shared hook callbacks know which message/result slot to update.
   const streamContextRef = useRef({});
+
+  // B1: pending compare send awaiting cost confirmation + one-time skip flag per
+  // compare session so we don't nag on every subsequent message.
+  const [pendingSend, setPendingSend] = useState(null); // { text, attachments }
+  const compareSkippedRef = useRef(false);
+
+  // B2: transient save-feedback ("saved" | "stripped" | "failed").
+  const [saveStatus, setSaveStatus] = useState(null);
+  const saveStatusTimer = useRef(null);
+
+  const flashSaveStatus = useCallback((status) => {
+    setSaveStatus(status);
+    if (saveStatusTimer.current) clearTimeout(saveStatusTimer.current);
+    saveStatusTimer.current = setTimeout(() => setSaveStatus(null), 3000);
+  }, []);
+
+  // B3: gateway requires an API key but none exists → show a CTA instead of
+  // letting every request fail with an opaque 401.
+  const [authBanner, setAuthBanner] = useState(false);
+  // B4: model/provider-load diagnostics + retry instead of a silently empty picker.
+  const [modelError, setModelError] = useState(null);
+  // B5: which side panel is open on mobile (history | params | null).
+  const [mobilePanel, setMobilePanel] = useState(null);
 
   // ── Stream callbacks (stable — read context from ref) ──────────────────────
   //
@@ -160,6 +225,33 @@ export default function PlaygroundClient() {
 
   // ── Init ──────────────────────────────────────────────────────────────────
 
+  // B4: (re)load active provider connections + model aliases + model catalog.
+  // Extracted so the picker gets a working retry button when it fails.
+  const refreshModels = useCallback(async () => {
+    setModelError(null);
+    try {
+      const [providersRes, aliasesRes, modelsRes] = await Promise.all([
+        fetch("/api/providers"),
+        fetch("/api/models/alias"),
+        fetch("/api/v1/models"),
+      ]);
+      const providersData = await providersRes.json();
+      setActiveProviders((providersData.connections || []).filter((c) => c.isActive !== false));
+      const aliasesData = await aliasesRes.json();
+      setModelAliases(aliasesData.aliases || {});
+      const modelsData = await modelsRes.json();
+      const list = (modelsData.data || []).map((m) => ({
+        id: m.id,
+        name: m.id,
+        provider: m.owned_by || m.id.split("/")[0],
+      }));
+      setModels(list);
+      if (list.length > 0) setSelectedModels((prev) => (prev[0] ? prev : [list[0].id]));
+    } catch (e) {
+      setModelError(e?.message || "Failed to load models");
+    }
+  }, []);
+
   useEffect(() => {
     (async () => {
       const loaded = loadSessions();
@@ -171,39 +263,34 @@ export default function PlaygroundClient() {
         const activeKey = (keysData.keys || keysData || []).find?.((k) => k.isActive !== false);
         if (activeKey?.key) apiKeyRef.current = activeKey.key;
       } catch {}
-      // Fetch active connections + model aliases in parallel. These drive the
-      // ModelSelectModal so the picker reflects the user's real provider setup
-      // (connected providers + custom models + disabled-model filtering) instead
-      // of the flat /v1/models catalog.
+      // B3: if the gateway requires an API key but none exists, tell the user how
+      // to fix it instead of letting requests fail with an opaque 401.
       try {
-        const [providersRes, aliasesRes, modelsRes] = await Promise.all([
-          fetch("/api/providers"),
-          fetch("/api/models/alias"),
-          fetch("/api/v1/models"),
-        ]);
-        const providersData = await providersRes.json();
-        setActiveProviders((providersData.connections || []).filter((c) => c.isActive !== false));
-        const aliasesData = await aliasesRes.json();
-        setModelAliases(aliasesData.aliases || {});
-        const modelsData = await modelsRes.json();
-        const list = (modelsData.data || []).map((m) => ({
-          id: m.id,
-          name: m.id,
-          provider: m.owned_by || m.id.split("/")[0],
-        }));
-        setModels(list);
-        if (list.length > 0) setSelectedModels([list[0].id]);
-      } catch {}
+        const sRes = await fetch("/api/settings");
+        const sData = await sRes.json();
+        const required = sData.requireApiKey === true;
+        setAuthBanner(required && !apiKeyRef.current);
+      } catch {
+        setAuthBanner(false);
+      }
+      await refreshModels();
       setLoading(false);
     })();
-  }, []);
+  }, [refreshModels]);
 
   // ── Session management ────────────────────────────────────────────────────
+
+  // B1: reset the compare cost-confirmation skip flag whenever the user leaves
+  // compare mode, so re-entering compare asks to confirm again.
+  useEffect(() => {
+    if (mode === "single") compareSkippedRef.current = false;
+  }, [mode]);
 
   const newSession = useCallback(() => {
     if (messages.length > 0 && currentSession) {
       updateSession(currentSession, messages);
     }
+    setPendingSend(null);
     setMessages([]);
     setCurrentSession(null);
     setStats({});
@@ -233,9 +320,11 @@ export default function PlaygroundClient() {
   }, [sessions, currentSession]);
 
   const updateSession = useCallback((id, msgs) => {
-    const updated = sessions.map((s) =>
-      s.id === id ? { ...s, messages: msgs, updatedAt: Date.now() } : s
-    );
+    const updated = sessions
+      .map((s) =>
+        s.id === id ? { ...s, messages: msgs.slice(-MAX_STORED_MESSAGES), updatedAt: Date.now() } : s
+      )
+      .slice(0, MAX_SESSIONS);
     setSessions(updated);
     saveSessions(updated);
   }, [sessions]);
@@ -247,7 +336,8 @@ export default function PlaygroundClient() {
     const session = {
       id,
       title,
-      messages,
+      // #19/B2: bound stored history so localStorage can't blow out.
+      messages: messages.slice(-MAX_STORED_MESSAGES),
       model: selectedModels[0],
       params,
       createdAt: Date.now(),
@@ -257,10 +347,12 @@ export default function PlaygroundClient() {
     const updated = existing
       ? sessions.map((s) => (s.id === id ? { ...s, ...session } : s))
       : [session, ...sessions];
-    setSessions(updated);
-    saveSessions(updated);
+    const capped = updated.slice(0, MAX_SESSIONS);
+    setSessions(capped);
+    const status = saveSessions(capped);
     setCurrentSession(id);
-  }, [messages, currentSession, sessions, selectedModels, params]);
+    flashSaveStatus(status);
+  }, [messages, currentSession, sessions, selectedModels, params, flashSaveStatus]);
 
   // ── Chat send ─────────────────────────────────────────────────────────────
 
@@ -310,9 +402,9 @@ export default function PlaygroundClient() {
     return { userMsg, baseMessages, requestParams };
   }, [messages, params]);
 
-  const sendMessage = useCallback(async (text, attachments = []) => {
-    if ((!text.trim() && attachments.length === 0) || streaming) return;
-
+  // B1: the actual send (single or compare fan-out). Kept separate from
+  // `sendMessage` so compare sends can be gated behind a cost confirmation.
+  const runSend = useCallback(async (text, attachments = []) => {
     const { userMsg, baseMessages, requestParams } = buildRequestBody(text, attachments);
     const apiKey = apiKeyRef.current;
     const startTime = Date.now();
@@ -357,10 +449,39 @@ export default function PlaygroundClient() {
 
       setStats({ compareLatencyMs: Date.now() - startTime, models: validModels.length });
     }
-  }, [streaming, mode, selectedModels, buildRequestBody, streamChat]);
+  }, [mode, selectedModels, buildRequestBody, streamChat]);
+
+  const sendMessage = useCallback(async (text, attachments = []) => {
+    if ((!text.trim() && attachments.length === 0) || streaming) return;
+
+    // B1: cost-amplification guard — a compare fan-out turns one request into N
+    // upstream calls (~N× tokens). Require an explicit confirmation the first
+    // time, then don't nag again within the same compare session.
+    if (mode === "compare" && !compareSkippedRef.current) {
+      const fanout = selectedModels.filter(Boolean).length;
+      if (fanout > 1) {
+        setPendingSend({ text, attachments });
+        return;
+      }
+    }
+
+    await runSend(text, attachments);
+  }, [mode, streaming, selectedModels, runSend]);
+
+  // B1: user confirmed the compare fan-out → remember the choice AND dispatch.
+  const handleConfirmCompare = useCallback(() => {
+    compareSkippedRef.current = true;
+    if (pendingSend) {
+      runSend(pendingSend.text, pendingSend.attachments);
+      setPendingSend(null);
+    }
+  }, [pendingSend, runSend]);
 
   const handleStop = useCallback(() => {
     abortAll();
+    // B5: drop stale per-stream context entries — the AbortError path never calls
+    // handleComplete/handleError, so without this they'd leak for the session.
+    streamContextRef.current = {};
     // Mark all in-flight messages/results as not streaming. The hook's
     // AbortError path doesn't call onError, so we finalize the UI here.
     setMessages(prev => prev.map(m => m.streaming ? { ...m, streaming: false } : m));
@@ -400,9 +521,39 @@ export default function PlaygroundClient() {
             <Button size="sm" variant="ghost" icon={streaming ? "stop" : "save"} onClick={streaming ? handleStop : saveCurrentSession} disabled={!streaming && messages.length === 0}>
               {streaming ? "Stop" : "Save"}
             </Button>
+            {/* B5: side panels reachable on mobile (hidden on lg+ where they're inline) */}
+            <Button size="sm" variant="ghost" icon="history" className="lg:hidden" aria-label="Open history" onClick={() => setMobilePanel("history")} />
+            <Button size="sm" variant="ghost" icon="tune" className="lg:hidden" aria-label="Open parameters" onClick={() => setMobilePanel("params")} />
+            {saveStatus && (
+              <span className="text-xs text-text-muted" role="status" aria-live="polite">
+                {saveStatus === "saved" && "Saved"}
+                {saveStatus === "stripped" && "Saved — images removed to fit storage"}
+                {saveStatus === "failed" && "Save failed"}
+              </span>
+            )}
           </div>
         }
       />
+
+      {/* B3/B4: actionable diagnostics instead of opaque failures */}
+      {(authBanner || modelError) && (
+        <div className="flex flex-col gap-2">
+          {authBanner && (
+            <div className="flex items-center justify-between gap-3 rounded-brand border border-warning/30 bg-warning/5 px-3 py-2 text-xs text-warning">
+              <span>
+                <b>API key required.</b> The gateway requires an API key for requests, but no active key was found — sends will fail with a 401.
+              </span>
+              <a href="/dashboard/endpoint" className="shrink-0 font-semibold underline hover:text-warning/80">Create an API key →</a>
+            </div>
+          )}
+          {modelError && (
+            <div className="flex items-center justify-between gap-3 rounded-brand border border-danger/30 bg-danger/5 px-3 py-2 text-xs text-danger">
+              <span className="truncate">Failed to load models: {modelError}</span>
+              <Button size="sm" variant="outline" icon="refresh" onClick={refreshModels}>Retry</Button>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="flex min-w-0 gap-4">
         {/* History sidebar (hidden on mobile) */}
@@ -528,6 +679,39 @@ export default function PlaygroundClient() {
           />
         </div>
       </div>
+
+      {/* B1: compare fan-out cost confirmation */}
+      <ConfirmModal
+        isOpen={!!pendingSend}
+        onClose={() => setPendingSend(null)}
+        onConfirm={handleConfirmCompare}
+        title="Send to multiple models at once?"
+        message={
+          pendingSend
+            ? `Compare mode sends this exact prompt to ${selectedModels.filter(Boolean).length} models simultaneously. One request becomes ${selectedModels.filter(Boolean).length} upstream calls (~${selectedModels.filter(Boolean).length}× the tokens of a single request), billed by each provider.`
+            : ""
+        }
+        confirmText="Compare all"
+        cancelText="Cancel"
+        variant="secondary"
+      />
+
+      {/* B5: history / params accessible on mobile via a modal (they're hidden
+          inline below lg) */}
+      <Modal isOpen={mobilePanel === "history"} onClose={() => setMobilePanel(null)} title="History" size="lg">
+        <div className="max-h-[70vh] overflow-y-auto">
+          <HistoryPanel
+            sessions={sessions}
+            currentSession={currentSession}
+            onNew={newSession}
+            onLoad={(s) => { loadSession(s); setMobilePanel(null); }}
+            onDelete={deleteSession}
+          />
+        </div>
+      </Modal>
+      <Modal isOpen={mobilePanel === "params"} onClose={() => setMobilePanel(null)} title="Parameters" size="lg">
+        <ParameterPanel params={params} onChange={setParams} selectedModel={selectedModels[0]} />
+      </Modal>
     </div>
   );
 }
@@ -628,6 +812,7 @@ function Composer({ onSend, streaming, onStop }) {
             onClick={onStop}
             className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-danger/15 text-danger hover:bg-danger/25"
             title="Stop"
+            aria-label="Stop"
           >
             <span className="material-symbols-outlined text-[18px]">stop</span>
           </button>
@@ -637,6 +822,7 @@ function Composer({ onSend, streaming, onStop }) {
             disabled={!canSend}
             className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary text-white hover:bg-primary-hover disabled:opacity-40"
             title="Send"
+            aria-label="Send"
           >
             <span className="material-symbols-outlined text-[18px]">send</span>
           </button>

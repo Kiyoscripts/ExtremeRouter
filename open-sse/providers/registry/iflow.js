@@ -1,3 +1,5 @@
+import { IFLOW_OAUTH_CLIENT } from "../shared.js";
+
 export default {
   id: "iflow",
   hidden: true,
@@ -38,8 +40,8 @@ export default {
     { id: "iflow-rome-30ba3b", name: "iFlow ROME" },
   ],
   oauth: {
-    clientId: "10009311001",
-    clientSecret: "4Z3YjXycVsQvyGF1etiNlIBB4RsqSDtW",
+    clientId: IFLOW_OAUTH_CLIENT.clientId,
+    clientSecret: IFLOW_OAUTH_CLIENT.clientSecret,
     authorizeUrl: "https://iflow.cn/oauth",
     tokenUrl: "https://iflow.cn/oauth/token",
     userInfoUrl: "https://iflow.cn/api/oauth/getUserInfo",

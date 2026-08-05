@@ -1,4 +1,6 @@
 // Guards the deduped Antigravity OAuth client: same values across all 3 sources after refactor.
+// Values are now env-overridable via shared.js (Scenario A); these assertions pin the default
+// fallback when no env override is set (as in CI / a fresh install).
 import { describe, it, expect } from "vitest";
 
 const EXPECTED = {

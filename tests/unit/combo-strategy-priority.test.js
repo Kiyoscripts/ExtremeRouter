@@ -1,7 +1,7 @@
-// Verify strategy resolution priority: settings.comboStrategies[comboName]
-// (UI override) must WIN over combo.strategyConfig (persisted default).
-// This was the root cause of "combo set to Fusion but runs as fallback".
-import { describe, it, expect, vi, beforeEach } from "vitest";
+// Verify strategy resolution: settings.comboStrategies[comboName] fields
+// MERGE over combo.strategyConfig (base). Fixes both "Fusion shows as
+// fallback" AND "thinking-only edit resets strategy to fallback".
+import { describe, it, expect, vi } from "vitest";
 
 vi.mock("./model.js", () => ({
   getModelInfo: vi.fn(async (ref) => {
@@ -12,28 +12,39 @@ vi.mock("./model.js", () => ({
 
 import { buildComboExecutionGraph } from "@/sse/services/comboExecutionPolicy.js";
 
-const comboWithDefault = {
-  name: "glm-free",
+const comboWithSwarm = {
+  name: "test-combo",
   id: "c1",
-  models: ["oc/deepseek-v4-flash-free", "kimchi/deepseek-v4-flash"],
-  // combosRepo always fills strategyConfig with normalized defaults → non-empty
+  models: ["oc/a", "kimchi/b"],
+  strategyConfig: { fallbackStrategy: "swarm", managerModel: "cc/manager", thinking: { type: "auto" } },
+};
+
+const comboWithFallback = {
+  name: "glm-free",
+  id: "c2",
+  models: ["oc/a", "kimchi/b"],
   strategyConfig: { fallbackStrategy: "fallback", thinking: { type: "auto" } },
 };
 
-describe("combo strategy resolution priority", () => {
-  it("settings override (fusion) wins over combo.strategyConfig (fallback)", async () => {
-    const settingsEntry = { fallbackStrategy: "fusion", judgeModel: "oc/deepseek-v4-flash-free" };
-    const graph = await buildComboExecutionGraph(comboWithDefault, settingsEntry);
+describe("combo strategy resolution (merge)", () => {
+  it("settings fusion overrides combo fallback", async () => {
+    const graph = await buildComboExecutionGraph(comboWithFallback, { fallbackStrategy: "fusion" });
     expect(graph.config.fallbackStrategy).toBe("fusion");
   });
 
-  it("combo.strategyConfig used when no settings entry exists", async () => {
-    const graph = await buildComboExecutionGraph(comboWithDefault, undefined);
-    expect(graph.config.fallbackStrategy).toBe("fallback");
+  it("thinking-only settings entry does NOT reset strategy (keeps swarm)", async () => {
+    const graph = await buildComboExecutionGraph(comboWithSwarm, { thinking: { type: "effort", effort: "high" } });
+    expect(graph.config.fallbackStrategy).toBe("swarm");
+    expect(graph.config.thinking.effort).toBe("high"); // thinking override applied
   });
 
-  it("empty settings entry object falls back to combo.strategyConfig", async () => {
-    const graph = await buildComboExecutionGraph(comboWithDefault, {});
+  it("no settings entry → combo.strategyConfig used", async () => {
+    const graph = await buildComboExecutionGraph(comboWithSwarm, undefined);
+    expect(graph.config.fallbackStrategy).toBe("swarm");
+  });
+
+  it("empty settings entry → combo.strategyConfig used", async () => {
+    const graph = await buildComboExecutionGraph(comboWithFallback, {});
     expect(graph.config.fallbackStrategy).toBe("fallback");
   });
 });

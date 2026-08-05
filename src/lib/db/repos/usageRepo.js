@@ -15,6 +15,12 @@ const RING_CAP = 50;
 const CONN_CACHE_TTL_MS = 30 * 1000;
 const PERIOD_MS = { "24h": 86400000, "7d": 604800000, "30d": 2592000000, "60d": 5184000000 };
 
+// P0 (activity): retention — usageHistory and requestDetails (which stores full
+// request/response/thinking bodies in `data` TEXT) grow without bound. Prune
+// rows older than USAGE_RETENTION_DAYS on a throttled cadence from saveRequestUsage.
+const USAGE_RETENTION_DAYS = Number(process.env.USAGE_RETENTION_DAYS) || 90;
+const USAGE_PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000; // at most every 6h
+
 // In-memory state shared across Next.js modules
 if (!global._pendingRequests) global._pendingRequests = { byModel: {}, byAccount: {} };
 if (!global._lastErrorProvider) global._lastErrorProvider = { provider: "", ts: 0 };
@@ -26,6 +32,12 @@ if (!global._pendingTimers) global._pendingTimers = {};
 if (!global._recentRing) global._recentRing = { items: [], initialized: false };
 if (!global._connectionMapCache) global._connectionMapCache = { map: {}, ts: 0 };
 if (!global._statsEmitTimers) global._statsEmitTimers = { pending: null, update: null };
+// P0 (activity): shared compute-once cache so N connected dashboards don't each
+// run a full getUsageStats() on every statsEmitter "update" event. The first
+// handler to fire after invalidation computes once; the rest reuse the frame.
+if (!global._statsFrameCache) global._statsFrameCache = { frame: null, computing: null, ts: 0 };
+// P0 (activity): prune throttle state.
+if (!global._usagePrune) global._usagePrune = { lastAt: 0 };
 
 const pendingRequests = global._pendingRequests;
 const lastErrorProvider = global._lastErrorProvider;
@@ -33,6 +45,8 @@ const pendingTimers = global._pendingTimers;
 const recentRing = global._recentRing;
 const connCache = global._connectionMapCache;
 const statsEmitTimers = global._statsEmitTimers;
+const statsFrameCache = global._statsFrameCache;
+const usagePrune = global._usagePrune;
 
 export const statsEmitter = global._statsEmitter;
 
@@ -44,6 +58,58 @@ function scheduleStatsEvent(event, delayMs = 150) {
     statsEmitter.emit(event);
   }, delayMs);
   statsEmitTimers[key]?.unref?.();
+}
+
+// P0 (activity): prune usageHistory + requestDetails older than the retention
+// window. Throttled to at most once per USAGE_PRUNE_INTERVAL_MS. Called from
+// saveRequestUsage so it runs on real traffic without a separate scheduler.
+// Guarded so a prune failure never breaks the save path.
+export async function maybePruneUsageHistory() {
+  const now = Date.now();
+  if (now - usagePrune.lastAt < USAGE_PRUNE_INTERVAL_MS) return;
+  usagePrune.lastAt = now;
+  try {
+    const db = await getAdapter();
+    const cutoff = new Date(now - USAGE_RETENTION_DAYS * 86400000).toISOString();
+    db.run(`DELETE FROM usageHistory WHERE timestamp < ?`, [cutoff]);
+    // requestDetails may not exist on every install; guard with a table check.
+    const tables = db.all(`SELECT name FROM sqlite_master WHERE type='table' AND name='requestDetails'`);
+    if (tables.length > 0) {
+      db.run(`DELETE FROM requestDetails WHERE timestamp < ?`, [cutoff]);
+    }
+  } catch (e) {
+    // non-fatal — next traffic will retry
+    console.warn("[usage] prune failed:", e?.message || e);
+  }
+}
+
+// P0 (activity): compute-once stats frame. The first SSE handler to arrive
+// after a cache miss computes getUsageStats(period); concurrent handlers await
+// the same promise instead of each running a full scan.
+export async function getStatsFrame(period = "all") {
+  const now = Date.now();
+  const cached = statsFrameCache;
+  // Cache hit: same period + fresh (< 1s).
+  if (cached.frame && cached.period === period && now - cached.ts < 1000) {
+    return cached.frame;
+  }
+  // Cache miss: dedupe concurrent computes for the same period.
+  if (cached.computing && cached.computingPeriod === period) {
+    return cached.computing;
+  }
+  cached.computingPeriod = period;
+  cached.computing = (async () => {
+    try {
+      const frame = await getUsageStats(period);
+      cached.frame = frame;
+      cached.period = period;
+      cached.ts = Date.now();
+      return frame;
+    } finally {
+      cached.computing = null;
+    }
+  })();
+  return cached.computing;
 }
 
 function getLocalDateKey(timestamp) {
@@ -377,6 +443,9 @@ export async function saveRequestUsage(entry) {
       pushToRing(entry);
       scheduleStatsEvent("update", 250);
     }
+    // P0 (activity): opportunistically prune old rows. Throttled internally so
+    // this is cheap on the hot path (returns immediately outside the interval).
+    maybePruneUsageHistory();
   } catch (e) {
     console.error("Failed to save usage stats:", e);
   }

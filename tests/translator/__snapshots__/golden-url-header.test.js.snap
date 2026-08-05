@@ -1068,6 +1068,25 @@ exports[`GOLDEN buildHeaders (default executor providers) > hyperbolic → heade
 }
 `;
 
+exports[`GOLDEN buildHeaders (default executor providers) > inferx → headers (apiKey / oauth) 1`] = `
+{
+  "apiKey": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+  "nonStream": {
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+  "oauth": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+}
+`;
+
 exports[`GOLDEN buildHeaders (default executor providers) > infron → headers (apiKey / oauth) 1`] = `
 {
   "apiKey": {
@@ -1431,6 +1450,25 @@ exports[`GOLDEN buildHeaders (default executor providers) > nanobanana → heade
 `;
 
 exports[`GOLDEN buildHeaders (default executor providers) > nebius → headers (apiKey / oauth) 1`] = `
+{
+  "apiKey": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+  "nonStream": {
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+  "oauth": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+}
+`;
+
+exports[`GOLDEN buildHeaders (default executor providers) > novita → headers (apiKey / oauth) 1`] = `
 {
   "apiKey": {
     "Accept": "text/event-stream",
@@ -1830,6 +1868,25 @@ exports[`GOLDEN buildHeaders (default executor providers) > trae → headers (ap
   "oauth": {
     "Accept": "text/event-stream",
     "Authorization": "<CRED>",
+    "Content-Type": "application/json",
+  },
+}
+`;
+
+exports[`GOLDEN buildHeaders (default executor providers) > unimodel → headers (apiKey / oauth) 1`] = `
+{
+  "apiKey": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+  "nonStream": {
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+  "oauth": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
     "Content-Type": "application/json",
   },
 }
@@ -2436,6 +2493,13 @@ exports[`GOLDEN buildUrl (default executor providers) > hyperbolic → url (stre
 }
 `;
 
+exports[`GOLDEN buildUrl (default executor providers) > inferx → url (stream + non-stream) 1`] = `
+{
+  "nonStream": "https://model.inferx.net/endpoints/v1/chat/completions",
+  "stream": "https://model.inferx.net/endpoints/v1/chat/completions",
+}
+`;
+
 exports[`GOLDEN buildUrl (default executor providers) > infron → url (stream + non-stream) 1`] = `
 {
   "nonStream": "https://llm.onerouter.pro/v1/chat/completions",
@@ -2559,6 +2623,13 @@ exports[`GOLDEN buildUrl (default executor providers) > nebius → url (stream +
 {
   "nonStream": "https://api.studio.nebius.ai/v1/chat/completions",
   "stream": "https://api.studio.nebius.ai/v1/chat/completions",
+}
+`;
+
+exports[`GOLDEN buildUrl (default executor providers) > novita → url (stream + non-stream) 1`] = `
+{
+  "nonStream": "https://api.novita.ai/v3/openai/chat/completions",
+  "stream": "https://api.novita.ai/v3/openai/chat/completions",
 }
 `;
 
@@ -2699,6 +2770,13 @@ exports[`GOLDEN buildUrl (default executor providers) > trae → url (stream + n
 {
   "nonStream": "https://core-normal.trae.ai/api/remote/v1",
   "stream": "https://core-normal.trae.ai/api/remote/v1",
+}
+`;
+
+exports[`GOLDEN buildUrl (default executor providers) > unimodel → url (stream + non-stream) 1`] = `
+{
+  "nonStream": "https://sg.unimodel.ai/v1/chat/completions",
+  "stream": "https://sg.unimodel.ai/v1/chat/completions",
 }
 `;
 

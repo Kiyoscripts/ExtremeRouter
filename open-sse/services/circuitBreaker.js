@@ -87,6 +87,8 @@ function getOrCreate(key) {
       openedAt: null,
       cooldownEndsAt: null,
       halfOpenCalls: 0,
+      // A3 GC: last activity (any read/mutation) — used to evict idle entries.
+      lastActivityAt: Date.now(),
     };
     breakers.set(key, b);
   }
@@ -121,6 +123,7 @@ export function isCircuitOpen(provider, settings = {}, key = null) {
 
   const k = resolveKey(provider, key);
   const b = getOrCreate(k);
+  b.lastActivityAt = Date.now();
   const now = Date.now();
 
   if (b.state === "open") {
@@ -193,6 +196,7 @@ export function recordBreakerSuccess(provider, settings = {}, key = null) {
   if (!cfg.enabled) return;
   const k = resolveKey(provider, key);
   const b = getOrCreate(k);
+  b.lastActivityAt = Date.now();
   if (b.state !== "closed" || b.failures.length > 0) {
     b.state = "closed";
     b.failures = [];
@@ -213,6 +217,7 @@ export function recordBreakerFailure(provider, status, settings = {}, key = null
 
   const k = resolveKey(provider, key);
   const b = getOrCreate(k);
+  b.lastActivityAt = Date.now();
   const now = Date.now();
 
   // In HALF_OPEN, any failure re-trips immediately.
@@ -252,9 +257,30 @@ export function recordBreakerFailure(provider, status, settings = {}, key = null
 export function releaseBreakerProbe(provider, key = null) {
   const k = resolveKey(provider, key);
   const b = breakers.get(k);
-  if (!b || b.state !== "halfOpen") return;
+  if (!b) return;
+  b.lastActivityAt = Date.now();
+  if (b.state !== "halfOpen") return;
   if (b.halfOpenCalls > 0) {
     b.halfOpenCalls--;
+  }
+}
+
+// A3 GC: evict closed entries that have been idle for GC_IDLE_MS, at most once
+// per GC_INTERVAL_MS (driven by getBreakerStates reads, so no extra timer).
+// Only CLOSED entries are evicted — open/half-open entries carry transient
+// cooldown state that should not be forgotten, and they resolve on their own.
+const GC_IDLE_MS = 10 * 60 * 1000; // 10 min
+const GC_INTERVAL_MS = 60 * 1000;  // sweep at most once per minute
+let _lastSweepAt = 0;
+
+function sweepIdleBreakers(now) {
+  if (now - _lastSweepAt < GC_INTERVAL_MS) return;
+  _lastSweepAt = now;
+  const cutoff = now - GC_IDLE_MS;
+  for (const [k, b] of breakers) {
+    if (b.state === "closed" && (b.lastActivityAt || 0) < cutoff) {
+      breakers.delete(k);
+    }
   }
 }
 
@@ -263,6 +289,7 @@ export function releaseBreakerProbe(provider, key = null) {
  */
 export function getBreakerStates() {
   const now = Date.now();
+  sweepIdleBreakers(now);
   const out = [];
   for (const b of breakers.values()) {
     // Refresh HALF_OPEN transition for accurate display.

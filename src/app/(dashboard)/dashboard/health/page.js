@@ -1,5 +1,6 @@
 import PageHeader from "@/shared/components/PageHeader";
 import HealthMonitor from "@/shared/components/HealthMonitor";
+import BreakerMonitor from "@/shared/components/BreakerMonitor";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,7 @@ export default function HealthPage() {
         icon="monitor_heart"
       />
       <HealthMonitor />
+      <BreakerMonitor />
     </div>
   );
 }

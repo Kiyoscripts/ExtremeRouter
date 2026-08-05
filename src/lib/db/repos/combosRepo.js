@@ -11,6 +11,7 @@ function rowToCombo(row) {
     kind: row.kind,
     models: parseJson(row.models, []),
     strategyConfig: normalizeComboStrategyConfig(parseJson(row.strategyConfig, {})),
+    context_length: row.context_length === null || row.context_length === undefined ? null : Number(row.context_length),
     revision: Number(row.revision) || 1,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -41,13 +42,14 @@ export async function createCombo(data) {
     kind: data.kind || null,
     models: data.models || [],
     strategyConfig: normalizeComboStrategyConfig(data.strategyConfig),
+    context_length: data.context_length === undefined ? null : data.context_length,
     revision: 1,
     createdAt: now,
     updatedAt: now,
   };
   db.run(
-    `INSERT INTO combos(id, name, kind, models, strategyConfig, revision, createdAt, updatedAt) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
-    [combo.id, combo.name, combo.kind, stringifyJson(combo.models), stringifyJson(combo.strategyConfig), combo.revision, now, now],
+    `INSERT INTO combos(id, name, kind, models, strategyConfig, context_length, revision, createdAt, updatedAt) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [combo.id, combo.name, combo.kind, stringifyJson(combo.models), stringifyJson(combo.strategyConfig), combo.context_length, combo.revision, now, now],
   );
   return combo;
 }
@@ -70,12 +72,13 @@ export async function updateCombo(id, data) {
       kind: data.kind !== undefined ? data.kind : current.kind,
       models: data.models !== undefined ? data.models : current.models,
       strategyConfig: data.strategyConfig !== undefined ? normalizeComboStrategyConfig(data.strategyConfig) : current.strategyConfig,
+      context_length: data.context_length !== undefined ? data.context_length : current.context_length,
       revision: current.revision + 1,
       updatedAt: new Date().toISOString(),
     };
     db.run(
-      `UPDATE combos SET name = ?, kind = ?, models = ?, strategyConfig = ?, revision = ?, updatedAt = ? WHERE id = ? AND revision = ?`,
-      [merged.name, merged.kind, stringifyJson(merged.models), stringifyJson(merged.strategyConfig), merged.revision, merged.updatedAt, id, current.revision],
+      `UPDATE combos SET name = ?, kind = ?, models = ?, strategyConfig = ?, context_length = ?, revision = ?, updatedAt = ? WHERE id = ? AND revision = ?`,
+      [merged.name, merged.kind, stringifyJson(merged.models), stringifyJson(merged.strategyConfig), merged.context_length, merged.revision, merged.updatedAt, id, current.revision],
     );
     result = merged;
   });

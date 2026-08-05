@@ -55,14 +55,27 @@ export const KIMI_CODING_BASE_URL = "https://api.kimi.com/coding/v1/messages";
 export const OPENAI_COMPAT_BASE = "https://api.openai.com/v1";
 export const ANTHROPIC_COMPAT_BASE = "https://api.anthropic.com/v1";
 
-// Antigravity OAuth client credentials (public CLI client — duplicated in usage.js + src/lib/oauth)
+// Env-override helper (Scenario A): read an optional env var, falling back to the
+// packaged default. Defaults are intentionally UNCHANGED so existing OAuth refresh
+// tokens (bound to the packaged client identity) keep working after upgrade.
+// Setting a var lets a self-hoster use their OWN OAuth app — but it changes the
+// client identity, so ONLY that instance's own connections must be re-linked.
+const fromEnv = (key, fallback) => (typeof process !== "undefined" && process.env?.[key]) || fallback;
+
+// Antigravity OAuth client credentials (public CLI client — shared by registry + src/lib/oauth)
 export const ANTIGRAVITY_OAUTH_CLIENT = {
-  clientId: "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com",
-  clientSecret: "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"
+  clientId: fromEnv("ANTIGRAVITY_OAUTH_CLIENT_ID", "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com"),
+  clientSecret: fromEnv("ANTIGRAVITY_OAUTH_CLIENT_SECRET", "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")
 };
 
 // Gemini (Google) OAuth client credentials (public CLI client — shared by gemini, gemini-cli, src/lib/oauth)
 export const GOOGLE_OAUTH_CLIENT = {
-  clientId: "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com",
-  clientSecret: "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"
+  clientId: fromEnv("GEMINI_OAUTH_CLIENT_ID", "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com"),
+  clientSecret: fromEnv("GEMINI_OAUTH_CLIENT_SECRET", "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")
+};
+
+// iFlow OAuth client credentials (public CLI client)
+export const IFLOW_OAUTH_CLIENT = {
+  clientId: fromEnv("IFLOW_OAUTH_CLIENT_ID", "10009311001"),
+  clientSecret: fromEnv("IFLOW_OAUTH_CLIENT_SECRET", "4Z3YjXycVsQvyGF1etiNlIBB4RsqSDtW")
 };

@@ -1,14 +1,25 @@
-import { getUsageStats, statsEmitter, getActiveRequests } from "@/lib/usageDb";
+import { getStatsFrame, statsEmitter, getActiveRequests } from "@/lib/usageDb";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+// P0 (activity): period-safe + compute-once stream.
+//   - `period` is read from the query string so the stats frame matches the
+//     dashboard's selected period (was hardcoded to "all" → corrupted KPIs).
+//   - `getStatsFrame` dedupes concurrent full getUsageStats() computes across
+//     all connected clients (was: N clients × N full scans per request).
+//   - The lightweight "pending" push sends ONLY live fields (activeRequests,
+//     recentRequests, errorProvider) — never period-scoped aggregates, so the
+//     donut/latency no longer flicker to all-time values.
+export async function GET(request) {
+  const url = new URL(request.url);
+  const period = url.searchParams.get("period") || "all";
+
   const encoder = new TextEncoder();
   const state = { closed: false, keepalive: null, send: null, sendPending: null, cachedStats: null };
 
   const stream = new ReadableStream({
     async start(controller) {
-      // Full stats refresh (heavy) + immediate lightweight push
+      // Full stats refresh (heavy, but deduped via getStatsFrame) + immediate lightweight push
       state.send = async () => {
         if (state.closed) return;
         try {
@@ -18,8 +29,8 @@ export async function GET() {
             const quickStats = { ...state.cachedStats, activeRequests, recentRequests, errorProvider };
             controller.enqueue(encoder.encode(`data: ${JSON.stringify(quickStats)}\n\n`));
           }
-          // Then do full recalc and update cache
-          const stats = await getUsageStats();
+          // Then do full recalc (compute-once across all clients) and update cache
+          const stats = await getStatsFrame(period);
           state.cachedStats = stats;
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(stats)}\n\n`));
         } catch {
@@ -30,7 +41,10 @@ export async function GET() {
         }
       };
 
-      // Lightweight push: only refresh activeRequests + recentRequests on pending changes
+      // Lightweight push: only refresh activeRequests + recentRequests on pending changes.
+      // Period-scoped fields (statusCounts/errorRate/errorCount/latency) are NOT
+      // sent here — they're owned by the REST fetch for the selected period, so
+      // the donut/latency no longer flicker to all-time values on every pending tick.
       state.sendPending = async () => {
         if (state.closed || !state.cachedStats) return;
         try {

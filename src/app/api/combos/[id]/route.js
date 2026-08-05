@@ -4,6 +4,25 @@ import { resetComboRotation } from "open-sse/services/combo.js";
 import { validateComboDefinition } from "open-sse/services/comboConfig.js";
 import { validateComboRoles } from "open-sse/services/providerCapabilities.js";
 
+// Validate advertised context length: positive integer, null/unlimited allowed,
+// upper bound 2M tokens (no combo member exceeds it in practice; values above
+// the largest member capacity are allowed but the UI shows a warning badge —
+// the value is only an advertisement via /v1/models, real capacity depends on
+// the underlying models).
+const MAX_CONTEXT_LENGTH = 2_000_000;
+
+export function validateContextLength(value) {
+  if (value === null || value === undefined) return { ok: true, value: null };
+  const n = Number(value);
+  if (!Number.isInteger(n) || n <= 0) {
+    return { ok: false, error: "context_length must be a positive integer" };
+  }
+  if (n > MAX_CONTEXT_LENGTH) {
+    return { ok: false, error: `context_length must not exceed ${MAX_CONTEXT_LENGTH}` };
+  }
+  return { ok: true, value: n };
+}
+
 export async function GET(request, { params }) {
   try {
     const { id } = await params;
@@ -27,8 +46,15 @@ export async function PUT(request, { params }) {
       models: body.models !== undefined ? (Array.isArray(body.models) ? body.models.map((m) => typeof m === "string" ? m.trim() : m) : body.models) : prev.models,
       kind: body.kind !== undefined ? body.kind : prev.kind,
       strategyConfig: body.strategyConfig !== undefined ? body.strategyConfig : prev.strategyConfig,
+      context_length: body.context_length !== undefined ? body.context_length : prev.context_length,
     };
     const validation = validateComboDefinition(candidate);
+    if (!validation.valid) return NextResponse.json({ error: validation.errors[0], errors: validation.errors }, { status: 400 });
+
+    // Validate context_length if provided (positive int, within bound)
+    const v = validateContextLength(candidate.context_length);
+    if (!v.ok) return NextResponse.json({ error: v.error }, { status: 400 });
+    candidate.context_length = v.value;
     if (!validation.valid) return NextResponse.json({ error: validation.errors[0], errors: validation.errors }, { status: 400 });
 
     const violations = validateComboRoles(candidate.strategyConfig?.fallbackStrategy || "fallback", candidate.strategyConfig, candidate.models);

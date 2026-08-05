@@ -191,8 +191,12 @@ export default function OverviewTab({ period }) {
   }, [period]);
 
   // ---- SSE: live updates for the real-time fields only ----
+  // P0 (activity): the stream is period-aware (passes ?period=) and only pushes
+  // LIVE fields (activeRequests/recentRequests/errorProvider). Period-scoped
+  // aggregates (statusCounts/errorRate/errorCount/latency) are owned by the REST
+  // fetch above so the donut/latency no longer flicker to all-time values.
   useEffect(() => {
-    const es = new EventSource("/api/usage/stream");
+    const es = new EventSource(`/api/usage/stream?period=${period}`);
     es.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
@@ -200,14 +204,10 @@ export default function OverviewTab({ period }) {
           if (!prev) return prev; // never overwrite REST payload before it lands
           return {
             ...prev,
-            activeRequests: data.activeRequests,
-            recentRequests: data.recentRequests,
-            errorProvider: data.errorProvider,
-            pending: data.pending,
-            statusCounts: data.statusCounts ?? prev.statusCounts,
-            errorRate: data.errorRate ?? prev.errorRate,
-            errorCount: data.errorCount ?? prev.errorCount,
-            latency: data.latency ?? prev.latency,
+            activeRequests: data.activeRequests ?? prev.activeRequests,
+            recentRequests: data.recentRequests ?? prev.recentRequests,
+            errorProvider: data.errorProvider ?? prev.errorProvider,
+            pending: data.pending ?? prev.pending,
           };
         });
         if (hasLoadedStats.current) setLoading(false);
@@ -219,7 +219,7 @@ export default function OverviewTab({ period }) {
       if (hasLoadedStats.current) setLoading(false);
     };
     return () => es.close();
-  }, []);
+  }, [period]);
 
   const renderMainChart = useCallback(() => {
     if (chartLoading || !chartData) {
