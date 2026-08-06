@@ -33,7 +33,6 @@ export async function handleEmbeddings(request) {
       return errorResponse(HTTP_STATUS.BAD_REQUEST, e.message);
     }
     log.warn("EMBEDDINGS", "Invalid JSON body");
-    log.warn("EMBEDDINGS", "Invalid JSON body");
     return errorResponse(HTTP_STATUS.BAD_REQUEST, "Invalid JSON body");
   }
 
