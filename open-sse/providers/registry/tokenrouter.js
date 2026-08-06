@@ -38,6 +38,7 @@ export default {
   transport: {
     baseUrl: "https://api.tokenrouter.com/v1/chat/completions",
     format: "openai",
+    thinkingFormat: "openai",
     validateUrl: "https://api.tokenrouter.com/v1/models",
     // Quota Tracker endpoints (require the management key, NOT the chat key).
     usage: {
@@ -51,5 +52,11 @@ export default {
   modelsFetcher: {
     url: "https://api.tokenrouter.com/v1/models",
     type: "openai",
+  },
+  pricing: "tokenrouter",
+  // TokenRouter: reasoning_effort sent as enum low/medium/high/xhigh/max — expose UI picker.
+  thinkingConfig: {
+    options: ["auto", "none", "low", "medium", "high", "xhigh", "max"],
+    defaultMode: "auto",
   },
 };
