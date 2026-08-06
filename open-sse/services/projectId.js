@@ -16,6 +16,16 @@ const projectIdCache = new Map();
 /** How long a cached project ID is considered fresh (1 hour). */
 const CACHE_TTL_MS = 60 * 60 * 1000;
 
+// ─── Negative cache (failure cooldown) ──────────────────────────────────────
+// connectionId -> { failedAt: number }. A recent failed fetch (loadCodeAssist
+// returned no project AND onboardUser exhausted its retries) is NOT re-attempted
+// for FAILURE_COOLDOWN_MS. Without this, a provider that won't provision a
+// project burns the full 5-attempt onboardUser (~10s) on EVERY request after a
+// token refresh — the projectId never persists, so !refreshedCredentials.projectId
+// stays true and the hot path re-fetches every time.
+const projectIdFailures = new Map();
+const FAILURE_COOLDOWN_MS = 10 * 60 * 1000;
+
 // ─── Pending-fetch deduplication ─────────────────────────────────────────────
 // connectionId -> { promise: Promise<string|null>, controller: AbortController, startedAt: number }
 const pendingFetches = new Map();
@@ -36,6 +46,12 @@ export function cleanupNow() {
     for (const [id, entry] of projectIdCache) {
         if (!entry || now - entry.fetchedAt >= CACHE_TTL_MS) {
             projectIdCache.delete(id);
+        }
+    }
+
+    for (const [id, f] of projectIdFailures) {
+        if (!f || now - f.failedAt >= FAILURE_COOLDOWN_MS) {
+            projectIdFailures.delete(id);
         }
     }
 
@@ -95,6 +111,15 @@ export async function getProjectIdForConnection(connectionId, accessToken, provi
         return cached.projectId;
     }
 
+    // Negative cache: a recent failed fetch is not re-attempted within the
+    // cooldown window. Prevents the hot path from burning the full 5-attempt
+    // onboardUser on every request after a token refresh when Google's backend
+    // won't provision a project for this account.
+    const fail = projectIdFailures.get(connectionId);
+    if (fail && Date.now() - fail.failedAt < FAILURE_COOLDOWN_MS) {
+        return null;
+    }
+
     // Deduplicate concurrent fetches for the same connection
     if (pendingFetches.has(connectionId)) {
         return pendingFetches.get(connectionId).promise;
@@ -108,12 +133,16 @@ export async function getProjectIdForConnection(connectionId, accessToken, provi
             const projectId = await fetchProjectId(accessToken, controller.signal, provider);
             if (projectId) {
                 projectIdCache.set(connectionId, {projectId, fetchedAt: Date.now()});
+                projectIdFailures.delete(connectionId);
                 return projectId;
             }
             console.warn("[ProjectId] could not fetch projectId for connection", connectionId.slice(0, 8));
+            projectIdFailures.set(connectionId, { failedAt: Date.now() });
             return null;
         } catch (error) {
             console.warn(`[ProjectId] Error fetching project ID: ${error.message}`);
+            // Network/backend errors also back off — don't hammer a down host.
+            projectIdFailures.set(connectionId, { failedAt: Date.now() });
             return null;
         } finally {
             pendingFetches.delete(connectionId);
@@ -130,6 +159,7 @@ export async function getProjectIdForConnection(connectionId, accessToken, provi
  */
 export function invalidateProjectId(connectionId) {
     projectIdCache.delete(connectionId);
+    projectIdFailures.delete(connectionId);
 }
 
 /**
@@ -141,6 +171,7 @@ export function invalidateProjectId(connectionId) {
 export function removeConnection(connectionId) {
     if (!connectionId) return;
     projectIdCache.delete(connectionId);
+    projectIdFailures.delete(connectionId);
     const pending = pendingFetches.get(connectionId);
     if (pending) {
         try { pending.controller.abort(); } catch (_) { /* ignore */ }
@@ -310,4 +341,18 @@ function extractProjectIdFromOnboard(data) {
     }
 
     return null;
+}
+
+// ─── Test-only hooks ─────────────────────────────────────────────────────────
+// Seed a negative-cache entry directly (bypasses the slow fetch → onboardUser
+// path that sleeps 2s × 5 attempts) so unit tests can exercise the negative
+// cache deterministically without waiting on real timers or mocking setTimeout.
+export function _seedProjectIdFailure(connectionId, failedAt = Date.now()) {
+    projectIdFailures.set(connectionId, { failedAt });
+}
+
+export function _resetProjectIdState() {
+    projectIdCache.clear();
+    projectIdFailures.clear();
+    pendingFetches.clear();
 }

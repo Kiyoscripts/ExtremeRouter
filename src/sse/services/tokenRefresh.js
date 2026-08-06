@@ -3,7 +3,6 @@ import * as log from "../utils/logger.js";
 import { updateProviderConnection } from "../../lib/localDb.js";
 import {
   getProjectIdForConnection,
-  invalidateProjectId,
   removeConnection,
 } from "open-sse/services/projectId.js";
 import {
@@ -127,9 +126,6 @@ function needsProjectId(provider) {
  */
 function _refreshProjectId(provider, connectionId, accessToken) {
   if (!needsProjectId(provider) || !connectionId || !accessToken) return;
-
-  // Evict the stale cached entry so getProjectIdForConnection does a real fetch
-  invalidateProjectId(connectionId);
 
   getProjectIdForConnection(connectionId, accessToken, provider)
     .then((projectId) => {
