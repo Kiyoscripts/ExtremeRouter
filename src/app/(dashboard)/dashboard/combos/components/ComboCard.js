@@ -29,6 +29,22 @@ const FUSION_ROLES = [
   { key: "judge", label: "Judge", icon: "gavel" },
 ];
 
+// ── Budget constants ──────────────────────────────────────────────
+// Mirrors open-sse/services/comboConfig.js — COMBO_LIMITS.maxEstimatedCostUsd
+// is the hard cap the backend clamps any persisted budget to. Keeping the
+// frontend default in sync means the shown value matches what the runtime
+// actually enforces.
+const COMBO_MAX_BUDGET_USD = 100;
+const COMBO_DEFAULT_BUDGET_USD = 5;
+
+// Resolve the effective per-request cost budget ($USD) for a combo. Uses the
+// persisted value when present, otherwise falls back to the runtime default.
+const resolveBudgetUsd = (strategy) => {
+  const raw = strategy?.budgets?.maxEstimatedCostUsd;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.min(COMBO_MAX_BUDGET_USD, n) : COMBO_DEFAULT_BUDGET_USD;
+};
+
 /**
  * Check if a provider (by id) can serve a control role (manager/staff/audit/judge).
  * Web cookie providers lack toolUse + fileAccess and are blocked from these roles.
@@ -100,6 +116,21 @@ export default function ComboCard({ combo, modelCaps = {}, activeProviders = [],
   const swarmStaff = strategy.staffModel || "";
   const swarmAudit = strategy.auditModel || "";
   const meta = getStrategyMeta(current);
+  // Effective per-request max cost budget ($USD) — read from strategy.budgets,
+  // falls back to the runtime default. Used both for the collapsed highlight
+  // badge and the expanded editable control.
+  const budgetUsd = resolveBudgetUsd(strategy);
+  const hasCustomBudget = strategy?.budgets?.maxEstimatedCostUsd != null && Number(strategy.budgets.maxEstimatedCostUsd) > 0;
+  const setBudgetUsd = (value) => {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0) return;
+    onSetStrategy({
+      budgets: {
+        ...(strategy.budgets || {}),
+        maxEstimatedCostUsd: Math.min(COMBO_MAX_BUDGET_USD, Math.max(0.01, n)),
+      },
+    });
+  };
   const thinking = strategy.thinking || {};
   const thinkingType = thinking.type || "auto";
   const isThinkingActive = thinkingType !== "auto" && thinkingType !== "off";
@@ -169,6 +200,18 @@ export default function ComboCard({ combo, modelCaps = {}, activeProviders = [],
                   {thinkingType === "effort" ? thinking.effort || "on" : thinkingType}
                 </Badge>
               )}
+              {/* Cost budget highlight — lets users see a combo's per-request max
+                  budget at a glance. Uses `warning` (amber) accent so it stands
+                  out; stays amber even when custom so it reads as a spend guard. */}
+              <Badge
+                variant="warning"
+                size="sm"
+                className="flex items-center gap-0.5"
+                title={`Max cost budget: $${budgetUsd.toFixed(2)} per request`}
+              >
+                <span className="material-symbols-outlined text-[10px]">savings</span>
+                ${budgetUsd.toFixed(2)}
+              </Badge>
               <span className="text-[10px] text-text-muted">{models.length} models</span>
             </div>
             {/* Model chips — first 3 + "+N more" */}
@@ -516,6 +559,32 @@ export default function ComboCard({ combo, modelCaps = {}, activeProviders = [],
           {/* Strategy description */}
           <div className="text-xs text-text-muted bg-black/[0.02] dark:bg-white/[0.02] rounded px-2 py-1.5">
             <span className="font-medium">{getStrategyLabel(current)}:</span> {STRATEGY_OPTIONS.find(o => o.value === current)?.desc}
+          </div>
+
+          {/* Cost budget control */}
+          <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-warning/20 bg-warning/[0.04] px-3 py-2">
+            <div className="flex items-center gap-1.5">
+              <span className="material-symbols-outlined text-[16px] text-warning">savings</span>
+              <span className="text-[11px] font-semibold text-text-main">Max Budget</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[12px] font-medium text-text-muted">$</span>
+              <input
+                type="number"
+                min={0.01}
+                max={COMBO_MAX_BUDGET_USD}
+                step={0.5}
+                value={budgetUsd}
+                onChange={(e) => setBudgetUsd(e.target.value)}
+                aria-label="Max cost budget in USD per request"
+                className="w-20 rounded border border-border bg-background px-1.5 py-0.5 text-[11px] font-mono text-right focus:outline-none focus:border-primary"
+              />
+            </div>
+            <span className="text-[10px] text-text-muted">per request</span>
+            <span className={`text-[10px] ${hasCustomBudget ? "text-primary" : "text-text-muted"}`}>
+              {hasCustomBudget ? `Custom $${budgetUsd.toFixed(2)}` : `Default $${COMBO_DEFAULT_BUDGET_USD.toFixed(2)}`}
+            </span>
+            <span className="text-[10px] text-text-subtle">cap ${COMBO_MAX_BUDGET_USD.toFixed(2)}</span>
           </div>
         </div>
       )}

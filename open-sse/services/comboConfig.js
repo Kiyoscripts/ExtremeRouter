@@ -13,7 +13,7 @@ export const COMBO_LIMITS = Object.freeze({
   maxOutputChars: 120000,
   maxAggregateOutputChars: 300000,
   maxLogicalCalls: 16,
-  maxEstimatedCostUsd: 5,
+  maxEstimatedCostUsd: 100,
 });
 
 const MODEL_REF_RE = /^[a-zA-Z0-9_.-]+\/.+$/;

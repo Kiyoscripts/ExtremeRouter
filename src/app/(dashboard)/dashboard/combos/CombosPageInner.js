@@ -141,8 +141,9 @@ export default function CombosPageInner() {
         fallback: [],
         "round-robin": [],
       };
-      // thinking + autoScale apply to EVERY strategy (fallback included) — always keep them.
-      const keep = new Set(["fallbackStrategy", "thinking", "autoScale", ...(ROLE_FIELDS[nextStrat] || [])]);
+      // thinking + autoScale + budgets apply to EVERY strategy (fallback
+      // included) — always keep them.
+      const keep = new Set(["fallbackStrategy", "thinking", "autoScale", "budgets", ...(ROLE_FIELDS[nextStrat] || [])]);
       const next = {};
       for (const [k, v] of Object.entries(merged)) {
         if (keep.has(k)) next[k] = v;
