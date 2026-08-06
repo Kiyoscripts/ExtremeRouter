@@ -29,4 +29,13 @@ http.createServer = (...args) => {
   return origCreate(...rest, wrapped);
 };
 
+// Start the proactive OAuth token refresh scheduler once the standalone server
+// is listening (independent of inbound traffic). No-op unless the connections
+// loaded; kill-switch DISABLE_BACKGROUND_TOKEN_REFRESH=1.
+if (!process.env.DISABLE_BACKGROUND_TOKEN_REFRESH) {
+  import("./src/sse/services/backgroundTokenRefresh.js")
+    .then((m) => m.startBackgroundTokenRefresh())
+    .catch((err) => console.error("[BG-REFRESH] init failed:", err?.message ?? err));
+}
+
 require("./server.js");

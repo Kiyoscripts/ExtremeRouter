@@ -18,6 +18,7 @@ import { startQuotaAutoPing } from "@/shared/services/quotaAutoPing";
 import { initAlertService } from "@/shared/services/alertService";
 import { syncToJson as syncMitmAliasCache } from "@/lib/mitmAliasCache";
 import { reactivateExpiredKimchiAccounts } from "@/sse/services/kimchiQuotaReactivation";
+import { startBackgroundTokenRefresh } from "@/sse/services/backgroundTokenRefresh";
 
 // Inject correct paths and DB hooks into manager.js (CJS) from ESM context
 (function bootstrapMitm() {
@@ -133,6 +134,7 @@ export async function initializeApp() {
     startQuotaAutoPing();
     initAlertService();
     startKimchiQuotaReactivation();
+    startBackgroundTokenRefresh();
   } catch (error) {
     console.error("[InitApp] Error:", error);
   }

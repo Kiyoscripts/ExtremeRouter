@@ -216,16 +216,24 @@ export async function updateProviderCredentials(connectionId, newCredentials) {
  *
  * @param {string} provider
  * @param {object} credentials
+ * @param {object} [opts] - options
+ * @param {boolean} [opts.force] - bypass the shouldRefreshCredentials gate.
+ *   Used by the background scheduler, which decides due-ness itself (lead
+ *   window max(provider lead, 30 min)) and must refresh even when the request
+ *   path wouldn't have. The request path never passes force — behavior
+ *   unchanged there.
  * @returns {Promise<object>} updated credentials object
  */
-export async function checkAndRefreshToken(provider, credentials) {
+export async function checkAndRefreshToken(provider, credentials, opts = {}) {
   let creds = { ...credentials };
   if (!creds.connectionId && creds.id) {
     creds.connectionId = creds.id;
   }
 
+  const gate = opts.force ? true : _shouldRefreshCredentials(provider, creds);
+
   // ── 1. Regular access-token expiry ────────────────────────────────────────
-  if (_shouldRefreshCredentials(provider, creds)) {
+  if (gate) {
     const expiresAt = creds.expiresAt ? new Date(creds.expiresAt).getTime() : null;
     const remaining = expiresAt ? expiresAt - Date.now() : null;
     const refreshLead = _getRefreshLeadMs(provider);

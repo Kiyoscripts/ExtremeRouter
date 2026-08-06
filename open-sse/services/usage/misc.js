@@ -45,28 +45,6 @@ export async function getIflowUsage(accessToken) {
 }
 
 /**
- * Ollama Cloud Usage
- * Ollama Cloud uses an API key from ollama.com/settings/keys
- * and has no public usage API — free tier has light usage limits (resets every 5h & 7d).
- * This returns an informational message with the plan details.
- */
-export async function getOllamaUsage(accessToken, providerSpecificData) {
-  try {
-    // Ollama Cloud does not expose a public quota/usage API.
-    // The provider is configured as noAuth with a notice explaining limits.
-    // We return a graceful message so the UI shows a friendly state instead of an error.
-    const plan = providerSpecificData?.plan || "Free";
-    return {
-      plan,
-      message: "Ollama Cloud uses a free tier with light usage limits (resets every 5h & 7d). For detailed usage tracking, visit ollama.com/settings/keys.",
-      quotas: [],
-    };
-  } catch (error) {
-    return { message: "Unable to fetch Ollama Cloud usage." };
-  }
-}
-
-/**
  * GLM Coding Plan usage (international + China regions)
  */
 export async function getGlmUsage(apiKey, provider, proxyOptions = null) {

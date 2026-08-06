@@ -14,11 +14,11 @@ import { getCodeBuddyCnUsage } from "./usage/codebuddy-cn.js";
 import {
   getQwenUsage,
   getIflowUsage,
-  getOllamaUsage,
   getGlmUsage,
   getVercelAiGatewayUsage,
   getQoderUsage,
 } from "./usage/misc.js";
+import { getOllamaUsage } from "./usage/ollama.js";
 import { getXaiUsage } from "./usage/xai.js";
 import { getTokenRouterUsage } from "./usage/tokenrouter.js";
 import { getClineUsage } from "./usage/cline.js";
@@ -42,7 +42,7 @@ const USAGE_HANDLERS = {
   qoder: (c) => getQoderUsage(c.accessToken, c.proxyOptions),
   qwen: (c) => getQwenUsage(c.accessToken, c.providerSpecificData),
   iflow: (c) => getIflowUsage(c.accessToken),
-  ollama: (c) => getOllamaUsage(c.accessToken),
+  ollama: (c) => getOllamaUsage(c.apiKey, c.proxyOptions),
   glm: (c) => getGlmUsage(c.apiKey, c.provider, c.proxyOptions),
   "glm-cn": (c) => getGlmUsage(c.apiKey, c.provider, c.proxyOptions),
   minimax: (c) => getMiniMaxUsage(c.apiKey, c.provider, c.proxyOptions),
