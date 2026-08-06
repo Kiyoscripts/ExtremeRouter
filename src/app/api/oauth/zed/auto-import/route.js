@@ -199,6 +199,68 @@ async function tryMacKeychain() {
 }
 
 /**
+ * Read a Windows Credential Manager entry via PowerShell P/Invoke (CredRead).
+ * Windows stores Zed cloud login under a generic credential targeted
+ * `zed:url=<credentials URL>`; the username is the user_id and the blob is
+ * the access token (usually a keyring-v2 JSON). Returns { userId, accessToken }
+ * or null.
+ */
+async function tryWindowsCredentialManager() {
+  // PowerShell heredoc — single-quoted literal; $sig uses PowerShell var refs
+  // that must survive. Keep the script free of user input interpolation.
+  const script = String.raw`
+$ErrorActionPreference = 'Stop'
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public class ZedCred {
+  [DllImport("Advapi32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
+  public static extern bool CredRead(string target, int type, int flags, out IntPtr credential);
+  [DllImport("Advapi32.dll")]
+  public static extern void CredFree(IntPtr buffer);
+  [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)]
+  public struct CREDENTIAL {
+    public int Flags; public int Type; public IntPtr TargetName; public IntPtr Comment;
+    public long LastWritten; public int CredentialBlobSize; public IntPtr CredentialBlob;
+    public int Persist; public int AttributeCount; public IntPtr Attributes; public IntPtr TargetAlias; public IntPtr UserName;
+  }
+}
+"@
+foreach ($url in @("https://zed.dev", "https://cloud.zed.dev")) {
+  $target = "zed:url=" + $url
+  $ptr = [IntPtr]::Zero
+  if (-not [ZedCred]::CredRead($target, 1, 0, [ref]$ptr)) { continue }
+  try {
+    $cred = [Runtime.InteropServices.Marshal]::PtrToStructure($ptr, [type][ZedCred+CREDENTIAL])
+    $len = $cred.CredentialBlobSize
+    if ($len -gt 0) {
+      $blob = New-Object byte[] $len
+      [Runtime.InteropServices.Marshal]::Copy($cred.CredentialBlob, $blob, 0, $len)
+      $token = [System.Text.Encoding]::UTF8.GetString($blob)
+      $user = [Runtime.InteropServices.Marshal]::PtrToStringUni($cred.UserName)
+      [Console]::Out.WriteLine("ZED_CM_FOUND|" + $user + "|" + $token)
+    }
+  } finally {
+    [ZedCred]::CredFree($ptr)
+  }
+}
+`;
+  try {
+    const { stdout } = await execFileAsync("powershell", ["-NoProfile", "-NonInteractive", "-Command", script], {
+      timeout: 10000,
+      maxBuffer: 1024 * 1024,
+    });
+    const line = stdout.split("\n").find((l) => l.startsWith("ZED_CM_FOUND|"));
+    if (!line) return null;
+    const [, user, token] = line.trim().split("|");
+    if (!user || !token) return null;
+    return parseCredentialsPayload(token, user);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * GET /api/oauth/zed/auto-import
  * Best-effort auto-detect Zed credentials from local files / keyring.
  */
@@ -245,6 +307,18 @@ export async function GET() {
           userId: fromKeychain.userId,
           accessToken: fromKeychain.accessToken,
           source: "keychain",
+        });
+      }
+    }
+
+    if (platform === "win32") {
+      const fromWindows = await tryWindowsCredentialManager();
+      if (fromWindows?.userId && fromWindows?.accessToken) {
+        return NextResponse.json({
+          found: true,
+          userId: fromWindows.userId,
+          accessToken: fromWindows.accessToken,
+          source: "windows-credential-manager",
         });
       }
     }
