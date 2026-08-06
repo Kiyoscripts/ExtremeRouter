@@ -3,7 +3,7 @@ import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { formatRetryAfter, checkFallbackError, isModelLockActive, buildModelLockUpdate, getEarliestModelLockUntil, isKimchiQuotaExhaustedError, buildKimchiQuotaExhaustedUpdate } from "open-sse/services/accountFallback.js";
 import { MAX_RATE_LIMIT_COOLDOWN_MS, RESET_COOLDOWN_CAP_MS } from "open-sse/config/errorConfig.js";
 import { resolveProviderId, FREE_PROVIDERS } from "@/shared/constants/providers.js";
-import { isCircuitOpen, breakerKey } from "open-sse/services/circuitBreaker.js";
+import { isCircuitOpen, breakerKey, getBreakerCooldownEndsAt } from "open-sse/services/circuitBreaker.js";
 import * as log from "../utils/logger.js";
 
 // Per-provider mutex map — account selection for DIFFERENT providers runs in
@@ -93,7 +93,15 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     const breakerSettings = await getSettings();
     if (isCircuitOpen(provider, breakerSettings)) {
       log.warn("AUTH", `${provider} | circuit breaker OPEN — skipping all accounts`);
-      return { allRateLimited: true, rateLimitedUntil: Date.now() + 30000, lastError: "Circuit breaker open", breakerOpen: true };
+      const cooldownEndsAt = getBreakerCooldownEndsAt(provider) || Date.now() + 30000;
+      return {
+        allRateLimited: true,
+        rateLimitedUntil: cooldownEndsAt,
+        retryAfter: new Date(cooldownEndsAt).toISOString(),
+        retryAfterHuman: formatRetryAfter(cooldownEndsAt),
+        lastError: "Circuit breaker open",
+        breakerOpen: true,
+      };
     }
 
     const connections = await getProviderConnections({ provider: providerId, isActive: true });
@@ -237,9 +245,12 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     const proxyKey = breakerKey(providerId, resolvedProxy);
     if (isCircuitOpen(provider, breakerSettings, proxyKey)) {
       log.warn("AUTH", `${provider} | breaker OPEN for proxy key "${proxyKey}" — skipping account`);
+      const cooldownEndsAt = getBreakerCooldownEndsAt(provider, proxyKey) || Date.now() + 30000;
       return {
         allRateLimited: true,
-        rateLimitedUntil: Date.now() + 30000,
+        rateLimitedUntil: cooldownEndsAt,
+        retryAfter: new Date(cooldownEndsAt).toISOString(),
+        retryAfterHuman: formatRetryAfter(cooldownEndsAt),
         lastError: `Circuit breaker open (${proxyKey})`,
         breakerOpen: true,
       };

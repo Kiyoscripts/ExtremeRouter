@@ -312,6 +312,19 @@ export function getBreakerStates() {
 }
 
 /**
+ * Get the cooldownEndsAt (epoch ms) for a breaker key, or null if the breaker
+ * has no state / is not OPEN. Used by callers that must report an accurate
+ * retry-after (e.g. getProviderCredentials returning rateLimited) instead of
+ * hardcoding a cooldown.
+ */
+export function getBreakerCooldownEndsAt(provider, key = null) {
+  const k = resolveKey(provider, key);
+  const b = breakers.get(k);
+  if (!b) return null;
+  return b.state === "open" && b.cooldownEndsAt ? b.cooldownEndsAt : null;
+}
+
+/**
  * Manually reset a breaker (for dashboard "force close" action).
  * When `key` is null, resets EVERY breaker entry for this provider
  * (all proxy variants) — matching the old per-provider semantics.
