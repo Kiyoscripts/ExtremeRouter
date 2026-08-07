@@ -3,6 +3,7 @@ import { FORMATS } from "../formats.js";
 import { ROLE, CLAUDE_BLOCK, MODEL_FALLBACK } from "../schema/index.js";
 import { fromOpenAIFinish } from "../concerns/finishReason.js";
 import { extractReasoningText } from "../concerns/reasoning.js";
+import { sanitizeUpstreamError } from "../concerns/sanitizeError.js";
 
 // Legacy "proxy_" prefix used by older request translators. Response strips it
 // defensively so tool names from such turns resolve back (e.g. proxy_Read → Read
@@ -69,7 +70,23 @@ function stopTextBlock(state, results) {
 
 // Convert OpenAI stream chunk to Claude format
 export function openaiToClaudeResponse(chunk, state) {
-  if (!chunk || !chunk.choices?.[0]) return null;
+  if (!chunk) return null;
+
+  // Upstream OpenAI-compatible error chunk → surface as an Anthropic `error`
+  // event (event: error). Without this the error is silently dropped and the
+  // Claude client receives an empty stream → "empty or malformed response (HTTP 200)".
+  if (chunk.error && typeof chunk.error === "object") {
+    const err = chunk.error;
+    return [{
+      type: "error",
+      error: {
+        type: typeof err.type === "string" ? err.type : "api_error",
+        message: sanitizeUpstreamError(err.message || err.code || "Upstream error")
+      }
+    }];
+  }
+
+  if (!chunk.choices?.[0]) return null;
 
   const results = [];
   const choice = chunk.choices[0];

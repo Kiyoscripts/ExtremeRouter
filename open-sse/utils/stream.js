@@ -73,6 +73,7 @@ export function createSSEStream(options = {}) {
   let openAIResponsesTerminalSeen = false;
   let openAIResponsesDoneSent = false;
   let streamDoneSent = false;  // track duplicate [DONE] across transform + flush
+  let errorSent = false;       // upstream emitted an error frame → suppress success finish/[DONE]
 
   return new TransformStream({
     transform(chunk, controller) {
@@ -298,6 +299,24 @@ export function createSSEStream(options = {}) {
         // Translate: targetFormat -> openai -> sourceFormat
         const translated = translateResponse(targetFormat, sourceFormat, parsed, state);
 
+        // Mid-stream upstream error (Anthropic `event: error`) → surface it to the
+        // OpenAI client as an error frame, then stop translating. Without this the
+        // error hits the translator's switch default and is silently dropped,
+        // leaving the client hanging with no terminal event.
+        if (translated && Array.isArray(translated) && translated.some((i) => i && i.error && typeof i.error === "object")) {
+          errorSent = true;
+          for (const item of translated) {
+            if (!item || !item.error) continue;
+            // Emit in the client's native framing: formatSSE(item, sourceFormat)
+            // yields `event: error\ndata: {...}` for Claude clients and a plain
+            // `data: {"error":...}` frame for OpenAI clients.
+            const output = formatSSE(item, sourceFormat);
+            reqLogger?.appendConvertedChunk?.(output);
+            controller.enqueue(sharedEncoder.encode(output));
+          }
+          break;
+        }
+
         // Log OpenAI intermediate chunks (if available)
         if (translated?._openaiIntermediate) {
           for (const item of translated._openaiIntermediate) {
@@ -369,7 +388,7 @@ export function createSSEStream(options = {}) {
           // Without it they can hang until timeout and trigger failover.
           // Gemini-family clients (Antigravity, Vertex, Gemini) reject this sentinel with 400 syntax errors.
           const isGeminiFamily = provider === "antigravity" || provider === "gemini" || provider === "vertex";
-          if (!streamDoneSent && !isGeminiFamily) {
+          if (!errorSent && !streamDoneSent && !isGeminiFamily) {
             const doneOutput = "data: [DONE]\n\n";
             reqLogger?.appendConvertedChunk?.(doneOutput);
             controller.enqueue(sharedEncoder.encode(doneOutput));
@@ -409,14 +428,14 @@ export function createSSEStream(options = {}) {
 
         const flushed = translateResponse(targetFormat, sourceFormat, null, state);
 
-        if (flushed?._openaiIntermediate) {
+        if (!errorSent && flushed?._openaiIntermediate) {
           for (const item of flushed._openaiIntermediate) {
             const openaiOutput = formatSSE(item, FORMATS.OPENAI);
             reqLogger?.appendOpenAIChunk?.(openaiOutput);
           }
         }
 
-        if (flushed?.length > 0) {
+        if (!errorSent && flushed?.length > 0) {
           for (const item of flushed) {
             if (item === null || item === undefined) continue;
             const output = formatSSE(item, sourceFormat);
@@ -427,14 +446,14 @@ export function createSSEStream(options = {}) {
 
         // Synthesize response.failed if a Responses passthrough stream never reached a terminal event
         const keepsOpenAIResponsesFormat = targetFormat === FORMATS.OPENAI_RESPONSES && sourceFormat === FORMATS.OPENAI_RESPONSES;
-        if (keepsOpenAIResponsesFormat && !openAIResponsesTerminalSeen) {
+        if (!errorSent && keepsOpenAIResponsesFormat && !openAIResponsesTerminalSeen) {
           const failedOutput = formatIncompleteOpenAIResponsesStreamFailure();
           reqLogger?.appendConvertedChunk?.(failedOutput);
           controller.enqueue(sharedEncoder.encode(failedOutput));
           openAIResponsesTerminalSeen = true;
         }
 
-        if (keepsOpenAIResponsesFormat && !openAIResponsesDoneSent && !streamDoneSent) {
+        if (!errorSent && keepsOpenAIResponsesFormat && !openAIResponsesDoneSent && !streamDoneSent) {
           const doneOutput = "data: [DONE]\n\n";
           reqLogger?.appendConvertedChunk?.(doneOutput);
           controller.enqueue(sharedEncoder.encode(doneOutput));

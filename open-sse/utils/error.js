@@ -1,4 +1,5 @@
 import { ERROR_TYPES, DEFAULT_ERROR_MESSAGES } from "../config/errorConfig.js";
+import { ANTHROPIC_API_VERSION } from "../providers/shared.js";
 
 /**
  * Build OpenAI-compatible error response body
@@ -32,7 +33,10 @@ export function errorResponse(statusCode, message) {
     status: statusCode,
     headers: {
       "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "*"
+      "Access-Control-Allow-Origin": "*",
+      // Required by Anthropic SDK/CLI — validates the streaming/protocol version
+      // even on error responses (Claude clients abort without it).
+      "anthropic-version": ANTHROPIC_API_VERSION
     }
   });
 }
@@ -46,7 +50,9 @@ export function errorResponse(statusCode, message) {
 export async function writeStreamError(writer, statusCode, message) {
   const errorBody = buildErrorBody(statusCode, message);
   const encoder = new TextEncoder();
-  await writer.write(encoder.encode(`data: ${JSON.stringify(errorBody)}\n\n`));
+  // event: error — named event so SSE clients (Claude/OpenAI) dispatch it as an
+  // error instead of treating the data frame as a message/parse failure.
+  await writer.write(encoder.encode(`event: error\ndata: ${JSON.stringify(errorBody)}\n\n`));
 }
 
 /**

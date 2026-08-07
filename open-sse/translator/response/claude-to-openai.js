@@ -1,10 +1,11 @@
-import { register } from "../index.js";
+﻿import { register } from "../index.js";
 import { FORMATS } from "../formats.js";
 import { ROLE, OPENAI_BLOCK, CLAUDE_BLOCK, OPENAI_FINISH } from "../schema/index.js";
 import { buildChunk } from "../concerns/chunk.js";
 import { toOpenAIUsage } from "../concerns/usage.js";
 import { reasoningDelta } from "../concerns/reasoning.js";
 import { toOpenAIFinish } from "../concerns/finishReason.js";
+import { sanitizeUpstreamError } from "../concerns/sanitizeError.js";
 
 // Create OpenAI chunk helper
 function createChunk(state, delta, finishReason = null) {
@@ -181,6 +182,16 @@ export function claudeToOpenAIResponse(chunk, state) {
         results.push({ ...createChunk(state, {}, finishReason), ...usageObj });
         state.finishReasonSent = true;
       }
+      break;
+    }
+    case "error": {
+      // Anthropic mid-stream error (e.g. overloaded_error / api_error). Anthropic
+      // can fail AFTER 200 OK has started streaming; surface it to OpenAI-format
+      // clients as an error frame instead of dropping it (clients would hang).
+      const claudeErr = chunk.error || {};
+      const message = sanitizeUpstreamError(claudeErr.message || claudeErr.type || "Upstream error");
+      const type = typeof claudeErr.type === "string" ? claudeErr.type : "upstream_error";
+      results.push({ error: { message, type, code: claudeErr.type || type, param: null } });
       break;
     }
   }
