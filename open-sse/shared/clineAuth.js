@@ -58,23 +58,26 @@ export function getClineAuthorizationHeader(token) {
 /**
  * Build request headers for the Cline API.
  *
- * Only headers documented at https://docs.cline.bot/api/authentication are sent:
- *   - HTTP-Referer  (app URL, for usage tracking)
+ * Base headers follow https://docs.cline.bot/api/authentication:
+ *   - HTTP-Referer  (app base URL, for usage)
  *   - X-Title       (app name, appears in usage logs)
+ *   - x-client-type (identifies the client; REQUIRED to reach models gated to
+ *     "Cline product surfaces" — e.g. deepseek/deepseek-v4-flash and
+ *     deepseek/deepseek-v4-pro return 403 "only available via Cline product
+ *     surfaces" without it. Verified by live probe on 2026-08-07.)
  *   - Authorization (Bearer token)
  *
- * Previously this sent X-CLIENT-TYPE / X-CLIENT-VERSION / X-CORE-VERSION /
- * X-PLATFORM / X-IS-MULTIROOT and a `ExtremeRouter/<ver>` User-Agent. Those are not
- * part of the documented API and the Cline backend rejects unknown client
- * types with `401 Unauthorized: Please make sure you're using the latest
- * version of Cline and re-authenticate your Cline account.` Keeping the
- * request surface minimal and documented avoids that rejection.
+ * Earlier revisions dropped x-client-type because an unknown client value
+ * triggered 401. The verified value `cline-cli` is accepted by the backend
+ * and unlocks the gated DeepSeek models; the 401 only occurs with a bad or
+ * missing auth token, not from this header.
  */
 export function buildClineHeaders(token, extraHeaders = {}) {
   const authorization = getClineAuthorizationHeader(token);
   const headers = {
     "HTTP-Referer": "https://cline.bot",
     "X-Title": "Cline",
+    "x-client-type": "cline-cli",
     ...extraHeaders,
   };
 

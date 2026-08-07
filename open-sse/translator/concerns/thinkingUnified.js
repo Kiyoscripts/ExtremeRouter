@@ -175,7 +175,8 @@ function applyFormat(fmt, body, cfg, caps) {
     case "openai": {
       if (none && canDisable) { body.reasoning_effort = "none"; break; }
       const level = toLevel(eff);
-      if (level) body.reasoning_effort = level;
+      if (level && level !== "auto") body.reasoning_effort = level;
+      else delete body.reasoning_effort;
       break;
     }
     case "claude-adaptive": {

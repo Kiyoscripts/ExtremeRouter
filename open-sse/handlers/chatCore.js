@@ -130,6 +130,17 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     stream = false;
   }
 
+  // Sync the resolved stream flag back into the request body. Providers with
+  // forceStream (cline, openai, codex, codebuddy-cn) are resolved to stream=true
+  // above, but body.stream may still carry the client's `false` — upstream then
+  // sees a non-streaming request and can reject it (Cline returns
+  // "empty response content" for stream:false). Overwrite so the body matches
+  // what the executor actually sends. stream_options injected by the executor
+  // only appears when stream=true, so no conflict here.
+  if (body && typeof body === "object") {
+    body.stream = stream;
+  }
+
   const reqLogger = await createRequestLogger(sourceFormat, targetFormat, model);
   if (clientRawRequest) reqLogger.logClientRawRequest(clientRawRequest.endpoint, clientRawRequest.body, clientRawRequest.headers);
   reqLogger.logRawRequest(body);

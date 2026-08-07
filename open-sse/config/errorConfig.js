@@ -70,6 +70,12 @@ export const ERROR_RULES = [
   { text: "no credentials",           cooldownMs: COOLDOWN.long },
   { text: "request not allowed",      cooldownMs: COOLDOWN.short },
   { text: "improperly formed request", cooldownMs: COOLDOWN.long },
+  // "empty response content" (Cline/DeepSeek upstream glitch): the model
+  // returned reasoning but no final content. Flaky ~50% per request — a
+  // per-request generation glitch, NOT account health. Retry fast (5s) instead
+  // of falling through to the 30s transient freeze which locks a healthy
+  // account after a single glitched request.
+  { text: "empty response",          cooldownMs: COOLDOWN.short },
   { text: "rate limit",               backoff: true },
   { text: "too many requests",        backoff: true },
   { text: "quota exceeded",           backoff: true },
