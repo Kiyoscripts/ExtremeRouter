@@ -485,12 +485,14 @@ exports[`GOLDEN buildHeaders (default executor providers) > cline → headers (a
     "Content-Type": "application/json",
     "HTTP-Referer": "https://cline.bot",
     "X-Title": "Cline",
+    "x-client-type": "cline-cli",
   },
   "nonStream": {
     "Authorization": "Bearer <TOK>",
     "Content-Type": "application/json",
     "HTTP-Referer": "https://cline.bot",
     "X-Title": "Cline",
+    "x-client-type": "cline-cli",
   },
   "oauth": {
     "Accept": "text/event-stream",
@@ -498,6 +500,7 @@ exports[`GOLDEN buildHeaders (default executor providers) > cline → headers (a
     "Content-Type": "application/json",
     "HTTP-Referer": "https://cline.bot",
     "X-Title": "Cline",
+    "x-client-type": "cline-cli",
   },
 }
 `;
@@ -510,12 +513,14 @@ exports[`GOLDEN buildHeaders (default executor providers) > clinepass → header
     "Content-Type": "application/json",
     "HTTP-Referer": "https://cline.bot",
     "X-Title": "Cline",
+    "x-client-type": "cline-cli",
   },
   "nonStream": {
     "Authorization": "Bearer <TOK>",
     "Content-Type": "application/json",
     "HTTP-Referer": "https://cline.bot",
     "X-Title": "Cline",
+    "x-client-type": "cline-cli",
   },
   "oauth": {
     "Accept": "text/event-stream",
@@ -523,6 +528,7 @@ exports[`GOLDEN buildHeaders (default executor providers) > clinepass → header
     "Content-Type": "application/json",
     "HTTP-Referer": "https://cline.bot",
     "X-Title": "Cline",
+    "x-client-type": "cline-cli",
   },
 }
 `;

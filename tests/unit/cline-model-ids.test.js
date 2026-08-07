@@ -43,8 +43,14 @@ describe("Cline model-ID format", () => {
     }
   });
 
-  it("uses the {vendor}/{model} shape for every entry", () => {
-    for (const id of ids()) expect(id).toMatch(/^[a-z0-9-]+\/.+/);
+  it("uses the {vendor}/{model} shape for every entry (bare ids are aliases with upstreamModelId)", () => {
+    for (const id of ids()) {
+      if (/^[a-z0-9-]+\/.+/.test(id)) continue; // canonical vendor/id form
+      // Bare ids are allowed ONLY as aliases that remap to a vendor-prefixed upstream.
+      const entry = clineModels().find((m) => m.id === id);
+      expect(entry?.upstreamModelId, `${id} must define upstreamModelId`).toBeDefined();
+      expect(entry.upstreamModelId).toMatch(/^[a-z0-9-]+\/.+/);
+    }
   });
 
   it("keeps the documented free-tier model available", () => {
