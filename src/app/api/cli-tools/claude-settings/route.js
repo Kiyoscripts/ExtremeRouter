@@ -41,9 +41,26 @@ const readSettings = async () => {
   try {
     const settingsPath = getClaudeSettingsPath();
     const content = await fs.readFile(settingsPath, "utf-8");
-    // Tolerate JSONC (trailing commas) and treat unparseable files as "no config"
-    // rather than throwing a 500 that the UI misreads as "tool not installed".
-    const stripped = content.replace(/,(\s*[}\]])/g, "$1");
+    // Tolerate JSONC (trailing commas, comments) and treat unparseable files as
+    // "no config" rather than throwing a 500 that the UI misreads as "tool not
+    // installed". String-safe: skip // and /* */ only outside quoted strings.
+    let stripped = "";
+    let inString = false, escaped = false;
+    for (let i = 0; i < content.length; i++) {
+      const ch = content[i];
+      if (escaped) { stripped += ch; escaped = false; continue; }
+      if (inString) {
+        if (ch === "\\") escaped = true;
+        else if (ch === '"') inString = false;
+        stripped += ch;
+        continue;
+      }
+      if (ch === '"') { inString = true; stripped += ch; continue; }
+      if (ch === "/" && content[i + 1] === "/") { while (i < content.length && content[i] !== "\n") i++; continue; }
+      if (ch === "/" && content[i + 1] === "*") { i += 2; while (i < content.length && !(content[i] === "*" && content[i + 1] === "/")) i++; i++; continue; }
+      stripped += ch;
+    }
+    stripped = stripped.replace(/,(\s*[}\]])/g, "$1");
     return JSON.parse(stripped);
   } catch (error) {
     return null;
@@ -99,16 +116,8 @@ export async function POST(request) {
     // Ensure .claude directory exists
     await fs.mkdir(claudeDir, { recursive: true });
 
-    // Read current settings
-    let currentSettings = {};
-    try {
-      const content = await fs.readFile(settingsPath, "utf-8");
-      currentSettings = JSON.parse(content);
-    } catch (error) {
-      if (error.code !== "ENOENT") {
-        throw error;
-      }
-    }
+    // Read current settings (tolerates JSONC trailing commas/comments)
+    const currentSettings = await readSettings() || {};
 
     // Normalize ANTHROPIC_BASE_URL to ensure /v1 suffix
     if (env.ANTHROPIC_BASE_URL) {
@@ -158,20 +167,16 @@ export async function DELETE() {
   try {
     const settingsPath = getClaudeSettingsPath();
 
-    // Read current settings
-    let currentSettings = {};
+    // Read current settings (tolerates JSONC trailing commas/comments)
     try {
-      const content = await fs.readFile(settingsPath, "utf-8");
-      currentSettings = JSON.parse(content);
-    } catch (error) {
-      if (error.code === "ENOENT") {
-        return NextResponse.json({
-          success: true,
-          message: "No settings file to reset",
-        });
-      }
-      throw error;
+      await fs.access(settingsPath);
+    } catch {
+      return NextResponse.json({
+        success: true,
+        message: "No settings file to reset",
+      });
     }
+    const currentSettings = await readSettings() || {};
 
     // Remove specified env fields
     if (currentSettings.env) {
