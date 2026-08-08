@@ -96,6 +96,18 @@ export const KIMI_CODING_CONFIG = {
   clientId: process.env.KIMI_CODING_OAUTH_CLIENT_ID || REGISTRY_PROVIDERS["kimi-coding"]?.clientId,
 };
 
+// Kimi Desktop OAuth Configuration (import token from the desktop app's token store)
+// Token storage path is the bridged JSON store the desktop app writes on login.
+// The stored access_token JWT doubles as the kimi-auth session against www.kimi.com.
+export const KIMI_DESKTOP_CONFIG = {
+  ...PROVIDER_OAUTH["kimi-desktop"],
+  tokenStoragePaths: {
+    linux: "~/.config/kimi-desktop/bridge-store/token-store.json (best-effort)",
+    macos: "~/Library/Application Support/kimi-desktop/bridge-store/token-store.json",
+    windows: "%APPDATA%\\kimi-desktop\\bridge-store\\token-store.json",
+  },
+};
+
 // KiloCode OAuth Configuration (Custom Device Auth Flow)
 export const KILOCODE_CONFIG = { ...PROVIDER_OAUTH["kilocode"] };
 
@@ -142,6 +154,7 @@ export const PROVIDERS = {
   KIRO: "kiro",
   CURSOR: "cursor",
   KIMI_CODING: "kimi-coding",
+  KIMI_DESKTOP: "kimi-desktop",
   KILOCODE: "kilocode",
   CLINE: "cline",
   CLINEPASS: "clinepass",

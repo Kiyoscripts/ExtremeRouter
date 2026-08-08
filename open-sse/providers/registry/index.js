@@ -156,6 +156,7 @@ import p154 from "./databricks.js";
 import p155 from "./unimodel.js";
 import p156 from "./inferx.js";
 import p157 from "./novita.js";
+import p158 from "./kimi-desktop.js";
 
 export default [
   p0,
@@ -315,4 +316,5 @@ export default [
   p155,
   p156,
   p157,
+  p158,
 ];

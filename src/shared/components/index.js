@@ -27,6 +27,7 @@ export { default as KiroOAuthWrapper } from "./KiroOAuthWrapper";
 export { default as KiroSocialOAuthModal } from "./KiroSocialOAuthModal";
 export { default as CursorAuthModal } from "./CursorAuthModal";
 export { default as ZedAuthModal } from "./ZedAuthModal";
+export { default as KimiDesktopAuthModal } from "./KimiDesktopAuthModal";
 export { default as OneMinAuthModal } from "./OneMinAuthModal";
 export { default as QwenAuthModal } from "./QwenAuthModal";
 export { default as WpStudioAuthModal } from "./WpStudioAuthModal";

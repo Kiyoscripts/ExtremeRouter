@@ -21,6 +21,7 @@ import {
   assertValidAwsRegion,
   CURSOR_CONFIG,
   KIMI_CODING_CONFIG,
+  KIMI_DESKTOP_CONFIG,
   KILOCODE_CONFIG,
   CLINE_CONFIG,
   CLINEPASS_CONFIG,
@@ -944,6 +945,24 @@ const PROVIDERS = {
       expiresIn: tokens.expiresIn || 86400,
       providerSpecificData: {
         machineId: tokens.machineId,
+        authMethod: "imported",
+      },
+    }),
+  },
+
+  "kimi-desktop": {
+    config: KIMI_DESKTOP_CONFIG,
+    // Session imported from the desktop app's token store. The access_token JWT
+    // is the kimi-auth session — stored as apiKey so the kimi-web executor uses
+    // it (Bearer + Cookie against www.kimi.com). Local auto-import/import routes
+    // handle deduplication; this only maps a token the generic route might yield.
+    flowType: "import_token",
+    mapTokens: (tokens) => ({
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken || null,
+      expiresIn: tokens.expiresIn || null,
+      providerSpecificData: {
+        origin: tokens.origin || "https://www.kimi.com",
         authMethod: "imported",
       },
     }),

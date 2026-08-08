@@ -89,6 +89,7 @@ const executors = {
   "deepseek-web": new DeepSeekWebExecutor(),
   "qwen-web": new QwenWebExecutor(),
   "kimi-web": new KimiWebExecutor(),
+  "kimi-desktop": new KimiWebExecutor(), // desktop token store → same www.kimi.com chat plane
   "blackbox-web": new BlackboxWebExecutor(),
   "t3-web": new T3ChatWebExecutor(),
   "duckduckgo-web": new DuckDuckGoWebExecutor(),
