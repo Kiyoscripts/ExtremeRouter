@@ -102,6 +102,8 @@ export const MEDIA_PROVIDER_KINDS = [
 export const OPENAI_COMPATIBLE_PREFIX = "openai-compatible-";
 export const ANTHROPIC_COMPATIBLE_PREFIX = "anthropic-compatible-";
 export const CUSTOM_EMBEDDING_PREFIX = "custom-embedding-";
+export const CUSTOM_STT_PREFIX = "custom-stt-";
+export const CUSTOM_TTS_PREFIX = "custom-tts-";
 
 export function isOpenAICompatibleProvider(providerId) {
   return typeof providerId === "string" && providerId.startsWith(OPENAI_COMPATIBLE_PREFIX);
@@ -113,6 +115,14 @@ export function isAnthropicCompatibleProvider(providerId) {
 
 export function isCustomEmbeddingProvider(providerId) {
   return typeof providerId === "string" && providerId.startsWith(CUSTOM_EMBEDDING_PREFIX);
+}
+
+export function isCustomSttProvider(providerId) {
+  return typeof providerId === "string" && providerId.startsWith(CUSTOM_STT_PREFIX);
+}
+
+export function isCustomTtsProvider(providerId) {
+  return typeof providerId === "string" && providerId.startsWith(CUSTOM_TTS_PREFIX);
 }
 
 // All providers (combined)

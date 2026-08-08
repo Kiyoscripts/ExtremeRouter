@@ -2,12 +2,12 @@ import {
   extractApiKey, isValidApiKey,
   getProviderCredentials, markAccountUnavailable,
 } from "../services/auth.js";
-import { getSettings, getApiKeyByKey } from "@/lib/localDb";
+import { getSettings, getApiKeyByKey, getProviderNodes } from "@/lib/localDb";
 import { getModelInfo, getComboModels } from "../services/model.js";
 import { handleTtsCore } from "open-sse/handlers/ttsCore.js";
 import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
-import { AI_PROVIDERS } from "@/shared/constants/providers";
+import { AI_PROVIDERS, CUSTOM_TTS_PREFIX } from "@/shared/constants/providers";
 import { handleComboChat } from "open-sse/services/combo.js";
 import * as log from "../utils/logger.js";
 import { assertModelAllowed } from "../utils/modelAccess.js";
@@ -61,7 +61,7 @@ export async function handleTts(request) {
     return handleComboChat({
       body,
       models: comboModels,
-      handleSingleModel: (b, m) => handleSingleModelTts(b, m, responseFormat, language),
+      handleSingleModel: (b, m) => handleSingleModelTts(b, m, responseFormat, language, apiKey),
       log,
       comboName: modelStr,
       comboStrategy,
@@ -69,15 +69,26 @@ export async function handleTts(request) {
     });
   }
 
-  return handleSingleModelTts(body, modelStr, responseFormat, language);
+  return handleSingleModelTts(body, modelStr, responseFormat, language, apiKey);
 }
 
-async function handleSingleModelTts(body, modelStr, responseFormat, language) {
+async function handleSingleModelTts(body, modelStr, responseFormat, language, apiKey) {
   const modelInfo = await getModelInfo(modelStr);
   if (!modelInfo.provider) return errorResponse(HTTP_STATUS.BAD_REQUEST, "Invalid model format");
 
   const { provider, model } = modelInfo;
   log.info("ROUTING", `Provider: ${provider}, Voice: ${model}`);
+
+  // Self-hosted TTS node (custom-tts-*) — baseUrl lives on the node, gateway API
+  // key doubles as bearer when set. OpenAI-compatible POST /v1/audio/speech.
+  if (provider.startsWith(CUSTOM_TTS_PREFIX)) {
+    const node = (await getProviderNodes({ type: "custom-tts" })).find((n) => n.id === provider);
+    if (!node?.baseUrl) return errorResponse(HTTP_STATUS.BAD_GATEWAY, "Self-hosted TTS node has no baseUrl");
+    const credentials = { providerSpecificData: { baseUrl: node.baseUrl }, ...(apiKey ? { apiKey } : {}) };
+    const result = await handleTtsCore({ provider, model, input: body.input, credentials, responseFormat, language });
+    if (result.success) return result.response;
+    return errorResponse(result.status || HTTP_STATUS.BAD_GATEWAY, result.error || "TTS failed");
+  }
 
   // noAuth providers — no credential needed
   if (!CREDENTIALED_PROVIDERS.has(provider)) {

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useState, useEffect } from "react";
 import { Card, Badge, Button, AddCustomEmbeddingModal, NoAuthProxyCard, ProviderInfoCard, PageHeader } from "@/shared/components";
 import ProviderIcon from "@/shared/components/ProviderIcon";
-import { MEDIA_PROVIDER_KINDS, AI_PROVIDERS, isCustomEmbeddingProvider } from "@/shared/constants/providers";
+import { MEDIA_PROVIDER_KINDS, AI_PROVIDERS, isCustomEmbeddingProvider, isCustomSttProvider, isCustomTtsProvider } from "@/shared/constants/providers";
 import { getProviderIconPath } from "@/shared/utils/providerIcon";
 import ConnectionsCard from "@/app/(dashboard)/dashboard/providers/components/ConnectionsCard";
 import ModelsCard from "@/app/(dashboard)/dashboard/providers/components/ModelsCard";
@@ -20,10 +20,13 @@ export default function MediaProviderDetailPage() {
   const { kind, id } = useParams();
   const router = useRouter();
   const kindConfig = MEDIA_PROVIDER_KINDS.find((k) => k.id === kind);
-  const isCustom = isCustomEmbeddingProvider(id) && kind === "embedding";
+  const isCustom =
+    (isCustomEmbeddingProvider(id) && kind === "embedding") ||
+    (isCustomSttProvider(id) && kind === "stt") ||
+    (isCustomTtsProvider(id) && kind === "tts");
 
   const handleDeleteCustom = async () => {
-    if (!confirm("Delete this Custom Embedding node?")) return;
+    if (!confirm(`Delete this Custom ${kind === "stt" ? "STT" : kind === "tts" ? "TTS" : "Embedding"} node?`)) return;
     try {
       const res = await fetch(`/api/provider-nodes/${id}`, { method: "DELETE" });
       if (res.ok) router.push(`/dashboard/media-providers/${kind}`);
@@ -55,9 +58,10 @@ export default function MediaProviderDetailPage() {
 
   const builtInProvider = AI_PROVIDERS[id];
 
-  // For custom embedding nodes, build a synthetic provider object
+  // For custom nodes, build a synthetic provider object
+  const customKindLabel = isCustomEmbeddingProvider(id) ? "Embedding" : isCustomSttProvider(id) ? "STT" : isCustomTtsProvider(id) ? "TTS" : "";
   const provider = isCustom
-    ? (customNode ? { id, name: customNode.name || "Custom Embedding", color: "#6366F1", textIcon: "CE" } : null)
+    ? (customNode ? { id, name: customNode.name || `Custom ${customKindLabel}`, color: customNode.color || "#6366F1", textIcon: customNode.textIcon || "CE" } : null)
     : builtInProvider;
 
   if (!isCustom && !builtInProvider) return notFound();
@@ -66,7 +70,7 @@ export default function MediaProviderDetailPage() {
     return <div className="text-text-muted text-sm py-12 text-center">Loading...</div>;
   }
 
-  const kinds = isCustom ? ["embedding"] : (provider.serviceKinds ?? ["llm"]);
+  const kinds = isCustom ? [kind] : (provider.serviceKinds ?? ["llm"]);
   if (!isCustom && !kinds.includes(kind)) return notFound();
 
   return (
@@ -185,6 +189,11 @@ export default function MediaProviderDetailPage() {
         <AddCustomEmbeddingModal
           isOpen={showEditModal}
           node={customNode}
+          nodeType={
+            isCustomSttProvider(id) ? "custom-stt"
+              : isCustomTtsProvider(id) ? "custom-tts"
+              : "custom-embedding"
+          }
           onClose={() => setShowEditModal(false)}
           onSaved={(updated) => {
             setCustomNode(updated);

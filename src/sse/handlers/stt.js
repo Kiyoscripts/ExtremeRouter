@@ -2,12 +2,12 @@ import {
   extractApiKey, isValidApiKey,
   getProviderCredentials, markAccountUnavailable,
 } from "../services/auth.js";
-import { getSettings, getApiKeyByKey } from "@/lib/localDb";
+import { getSettings, getApiKeyByKey, getProviderNodes } from "@/lib/localDb";
 import { getModelInfo } from "../services/model.js";
+import { AI_PROVIDERS, CUSTOM_STT_PREFIX } from "@/shared/constants/providers";
 import { handleSttCore } from "open-sse/handlers/sttCore.js";
 import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
-import { AI_PROVIDERS } from "@/shared/constants/providers";
 import * as log from "../utils/logger.js";
 import { assertModelAllowed } from "../utils/modelAccess.js";
 
@@ -52,6 +52,29 @@ export async function handleStt(request) {
 
   const { provider, model } = modelInfo;
   log.info("ROUTING", `Provider: ${provider}, Model: ${model}`);
+
+  // Self-hosted STT node (custom-stt-*) — baseUrl comes from the node itself,
+  // not the provider registry. OpenAI Whisper-compatible multipart shape.
+  if (provider.startsWith(CUSTOM_STT_PREFIX)) {
+    const node = (await getProviderNodes({ type: "custom-stt" })).find((n) => n.id === provider);
+    if (!node?.baseUrl) return errorResponse(HTTP_STATUS.BAD_GATEWAY, "Self-hosted STT node has no baseUrl");
+    // Gateway API key doubles as node bearer token when present (many self-hosted
+    // servers run keyless, then no Authorization header is sent).
+    const result = await handleSttCore({
+      provider,
+      model,
+      formData,
+      credentials: apiKey ? { apiKey } : undefined,
+      sttConfig: {
+        baseUrl: `${node.baseUrl.replace(/\/$/, "")}/v1/audio/transcriptions`,
+        authType: apiKey ? "bearer" : "none",
+        authHeader: "bearer",
+        format: "openai",
+      },
+    });
+    if (result.success) return result.response;
+    return errorResponse(result.status || HTTP_STATUS.BAD_GATEWAY, result.error || "STT failed");
+  }
 
   // noAuth providers
   if (!CREDENTIALED_PROVIDERS.has(provider)) {

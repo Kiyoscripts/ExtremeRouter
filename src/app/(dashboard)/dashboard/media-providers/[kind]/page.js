@@ -5,8 +5,17 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Card, Badge, Button, Toggle, AddCustomEmbeddingModal, PageHeader } from "@/shared/components";
 import ProviderIcon from "@/shared/components/ProviderIcon";
-import { MEDIA_PROVIDER_KINDS, AI_PROVIDERS, getProvidersByKind } from "@/shared/constants/providers";
+import { MEDIA_PROVIDER_KINDS, AI_PROVIDERS, getProvidersByKind, CUSTOM_EMBEDDING_PREFIX, CUSTOM_STT_PREFIX, CUSTOM_TTS_PREFIX } from "@/shared/constants/providers";
 import { getProviderIconPath } from "@/shared/utils/providerIcon";
+
+// Self-hosted node kinds: the kind maps to a provider-node type that this page
+// lists + lets the user add. Embedded servers (whisper.cpp, faster-whisper,
+// Kokoro-FastAPI...) front many machines — one node per baseUrl.
+const CUSTOM_NODE_BY_KIND = {
+  embedding: { type: "custom-embedding", label: "Embedding" },
+  stt: { type: "custom-stt", label: "STT" },
+  tts: { type: "custom-tts", label: "TTS" },
+};
 
 // Kinds that support combos (currently disabled for image/tts — temporarily hidden).
 // webSearch/webFetch handled by /web page.
@@ -154,7 +163,7 @@ export default function MediaProviderKindPage() {
   }, [kind, router]);
 
   const kindConfig = MEDIA_PROVIDER_KINDS.find((k) => k.id === kind);
-  const isEmbedding = kind === "embedding";
+  const customConfig = CUSTOM_NODE_BY_KIND[kind];
   const supportsCombo = COMBO_KINDS.has(kind);
 
   useEffect(() => {
@@ -163,10 +172,10 @@ export default function MediaProviderKindPage() {
       .then((r) => r.json())
       .then((d) => setConnections(d.connections || []))
       .catch(() => {});
-    if (isEmbedding) {
+    if (customConfig) {
       fetch("/api/provider-nodes", { cache: "no-store" })
         .then((r) => r.json())
-        .then((d) => setCustomNodes((d.nodes || []).filter((n) => n.type === "custom-embedding")))
+        .then((d) => setCustomNodes((d.nodes || []).filter((n) => n.type === customConfig.type)))
         .catch(() => {});
     }
     if (supportsCombo) {
@@ -175,7 +184,7 @@ export default function MediaProviderKindPage() {
         .then((d) => setCombos(d.combos || []))
         .catch(() => {});
     }
-  }, [isEmbedding, supportsCombo, kindConfig]);
+  }, [customConfig, supportsCombo, kindConfig]);
 
   if (!kindConfig) return notFound();
 
@@ -183,11 +192,16 @@ export default function MediaProviderKindPage() {
   const kindCombos = combos.filter((c) => c.kind === kind);
 
   // Map custom nodes to MediaProviderCard shape
+  const customIcon = (() => ({
+    "custom-embedding": { color: "#6366F1", textIcon: "CE" },
+    "custom-stt": { color: "#DC2626", textIcon: "ST" },
+    "custom-tts": { color: "#10B981", textIcon: "TT" },
+  })[customConfig?.type] || { color: "#6366F1", textIcon: "CE" });
+
   const customProviders = customNodes.map((n) => ({
     id: n.id,
-    name: n.name || "Custom Embedding",
-    color: "#6366F1",
-    textIcon: "CE",
+    name: n.name || `Custom ${customConfig?.label}`,
+    ...customIcon,
   }));
 
   const allProviders = [...providers, ...customProviders];
@@ -235,10 +249,10 @@ export default function MediaProviderKindPage() {
         description={`Manage your ${kindConfig?.label || kind} providers`}
         icon={kindConfig?.icon || "perm_media"}
         actions={
-          (isEmbedding || supportsCombo) && (
+          (customConfig || supportsCombo) && (
             <>
               {supportsCombo && <Button size="sm" icon="add" onClick={handleCreateCombo}>Create Combo</Button>}
-              {isEmbedding && <Button size="sm" icon="add" onClick={() => setShowAddCustomEmbedding(true)}>Add Custom Embedding</Button>}
+              {customConfig && <Button size="sm" icon="add" onClick={() => setShowAddCustomEmbedding(true)}>Add Custom {customConfig.label}</Button>}
             </>
           )
         }
@@ -276,9 +290,10 @@ export default function MediaProviderKindPage() {
         </div>
       )}
 
-      {isEmbedding && (
+      {customConfig && (
         <AddCustomEmbeddingModal
           isOpen={showAddCustomEmbedding}
+          nodeType={customConfig.type}
           onClose={() => setShowAddCustomEmbedding(false)}
           onCreated={(node) => {
             setCustomNodes((prev) => [...prev, node]);

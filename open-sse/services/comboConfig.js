@@ -13,7 +13,10 @@ export const COMBO_LIMITS = Object.freeze({
   maxOutputChars: 120000,
   maxAggregateOutputChars: 300000,
   maxLogicalCalls: 16,
-  maxEstimatedCostUsd: 100,
+  // Use Infinity so backend normalization does not clamp user-defined max
+  // estimated cost budgets to the old hard ceiling. The UI still enforces a
+  // sensible numeric minimum (>= 0.01) for plain-number inputs.
+  maxEstimatedCostUsd: Infinity,
 });
 
 const MODEL_REF_RE = /^[a-zA-Z0-9_.-]+\/.+$/;

@@ -30,19 +30,20 @@ const FUSION_ROLES = [
 ];
 
 // ── Budget constants ──────────────────────────────────────────────
-// Mirrors open-sse/services/comboConfig.js — COMBO_LIMITS.maxEstimatedCostUsd
-// is the hard cap the backend clamps any persisted budget to. Keeping the
-// frontend default in sync means the shown value matches what the runtime
-// actually enforces.
-const COMBO_MAX_BUDGET_USD = 100;
+// Backend no longer enforces a fixed $100 ceiling for combo cost budgets,
+// so the UI can allow user-defined budgets above the old cap as well.
 const COMBO_DEFAULT_BUDGET_USD = 5;
+
+const isUnlimitedBudget = (raw) =>
+  raw === "unlimited" || raw === Infinity || raw === "Infinity";
 
 // Resolve the effective per-request cost budget ($USD) for a combo. Uses the
 // persisted value when present, otherwise falls back to the runtime default.
 const resolveBudgetUsd = (strategy) => {
   const raw = strategy?.budgets?.maxEstimatedCostUsd;
+  if (isUnlimitedBudget(raw)) return Infinity;
   const n = Number(raw);
-  return Number.isFinite(n) && n > 0 ? Math.min(COMBO_MAX_BUDGET_USD, n) : COMBO_DEFAULT_BUDGET_USD;
+  return Number.isFinite(n) && n > 0 ? n : COMBO_DEFAULT_BUDGET_USD;
 };
 
 /**
@@ -120,14 +121,23 @@ export default function ComboCard({ combo, modelCaps = {}, activeProviders = [],
   // falls back to the runtime default. Used both for the collapsed highlight
   // badge and the expanded editable control.
   const budgetUsd = resolveBudgetUsd(strategy);
-  const hasCustomBudget = strategy?.budgets?.maxEstimatedCostUsd != null && Number(strategy.budgets.maxEstimatedCostUsd) > 0;
+  const isUnlimited = isUnlimitedBudget(strategy?.budgets?.maxEstimatedCostUsd);
+  const hasCustomBudget = strategy?.budgets?.maxEstimatedCostUsd != null && !isUnlimited && Number(strategy.budgets.maxEstimatedCostUsd) > 0;
   const setBudgetUsd = (value) => {
     const n = Number(value);
     if (!Number.isFinite(n) || n <= 0) return;
     onSetStrategy({
       budgets: {
         ...(strategy.budgets || {}),
-        maxEstimatedCostUsd: Math.min(COMBO_MAX_BUDGET_USD, Math.max(0.01, n)),
+        maxEstimatedCostUsd: n,
+      },
+    });
+  };
+  const setUnlimitedBudget = () => {
+    onSetStrategy({
+      budgets: {
+        ...(strategy.budgets || {}),
+        maxEstimatedCostUsd: "unlimited",
       },
     });
   };
@@ -572,19 +582,25 @@ export default function ComboCard({ combo, modelCaps = {}, activeProviders = [],
               <input
                 type="number"
                 min={0.01}
-                max={COMBO_MAX_BUDGET_USD}
                 step={0.5}
-                value={budgetUsd}
+                value={isUnlimited ? "" : budgetUsd}
                 onChange={(e) => setBudgetUsd(e.target.value)}
+                disabled={isUnlimited}
                 aria-label="Max cost budget in USD per request"
-                className="w-20 rounded border border-border bg-background px-1.5 py-0.5 text-[11px] font-mono text-right focus:outline-none focus:border-primary"
+                className="w-20 rounded border border-border bg-background px-1.5 py-0.5 text-[11px] font-mono text-right focus:outline-none focus:border-primary disabled:opacity-60"
               />
+              <button
+                type="button"
+                onClick={isUnlimited ? () => setBudgetUsd(5) : setUnlimitedBudget}
+                className={`rounded border px-2 py-0.5 text-[11px] font-medium ${isUnlimited ? "border-primary bg-primary/10 text-primary" : "border-border text-text-muted hover:text-text-main"}`}
+              >
+                {isUnlimited ? "Unlimited" : "∞"}
+              </button>
             </div>
             <span className="text-[10px] text-text-muted">per request</span>
-            <span className={`text-[10px] ${hasCustomBudget ? "text-primary" : "text-text-muted"}`}>
-              {hasCustomBudget ? `Custom $${budgetUsd.toFixed(2)}` : `Default $${COMBO_DEFAULT_BUDGET_USD.toFixed(2)}`}
+            <span className={`text-[10px] ${hasCustomBudget || isUnlimited ? "text-primary" : "text-text-muted"}`}>
+              {isUnlimited ? "Unlimited" : hasCustomBudget ? `Custom $${Number(budgetUsd).toFixed(2)}` : `Default $${COMBO_DEFAULT_BUDGET_USD.toFixed(2)}`}
             </span>
-            <span className="text-[10px] text-text-subtle">cap ${COMBO_MAX_BUDGET_USD.toFixed(2)}</span>
           </div>
         </div>
       )}

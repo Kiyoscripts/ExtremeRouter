@@ -57,7 +57,9 @@ export async function POST(request) {
     const body = await request.json();
     const { baseUrl, apiKey, type, modelId } = body;
 
-    if (!baseUrl || !apiKey) {
+    // Self-hosted STT/TTS often run keyless (localhost); allow empty apiKey there.
+    const keyless = type === "custom-stt" || type === "custom-tts";
+    if (!baseUrl || (!apiKey && !keyless)) {
       return NextResponse.json({ error: "Base URL and API key required" }, { status: 400 });
     }
 
@@ -102,6 +104,68 @@ export async function POST(request) {
         valid: false,
         error: `Embeddings request failed (${embedRes.status})${errBody ? `: ${errBody.slice(0, 200)}` : ""}`,
         method: "embeddings"
+      });
+    }
+
+    // Custom STT Validation — multipart probe against OpenAI Whisper-compatible
+    // endpoint (whisper.cpp, faster-whisper, llama-server, vLLM).
+    if (type === "custom-stt") {
+      const normalizedBase = baseUrl.trim().replace(/\/$/, "");
+      if (!modelId?.trim()) {
+        return NextResponse.json({ valid: false, error: "Model ID required for STT validation" });
+      }
+      // Minimal silent WAV header — enough for the server to accept the multipart shape.
+      const wav = Buffer.from(
+        "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=",
+        "base64"
+      );
+      const fd = new FormData();
+      fd.append("file", new Blob([wav], { type: "audio/wav" }), "ping.wav");
+      fd.append("model", modelId.trim());
+      const sttRes = await fetchWithTimeout(`${normalizedBase}/v1/audio/transcriptions`, {
+        method: "POST",
+        headers: apiKey ? { "Authorization": `Bearer ${apiKey}` } : {},
+        body: fd,
+      }, 30000);
+      if (sttRes.ok) {
+        return NextResponse.json({ valid: true, method: "stt" });
+      }
+      if (sttRes.status === 401 || sttRes.status === 403) {
+        return NextResponse.json({ valid: false, error: "API key unauthorized" });
+      }
+      const errBody = await sttRes.text().catch(() => "");
+      return NextResponse.json({
+        valid: false,
+        error: `STT request failed (${sttRes.status})${errBody ? `: ${errBody.slice(0, 200)}` : ""}`,
+        method: "stt"
+      });
+    }
+
+    // Custom TTS Validation — OpenAI /v1/audio/speech shape (Kokoro-FastAPI, XTTS, ...).
+    if (type === "custom-tts") {
+      const normalizedBase = baseUrl.trim().replace(/\/$/, "");
+      if (!modelId?.trim()) {
+        return NextResponse.json({ valid: false, error: "Model ID required for TTS validation" });
+      }
+      const ttsRes = await fetchWithTimeout(`${normalizedBase}/v1/audio/speech`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(apiKey ? { "Authorization": `Bearer ${apiKey}` } : {}),
+        },
+        body: JSON.stringify({ model: modelId.trim(), voice: "default", input: "ping" }),
+      }, 30000);
+      if (ttsRes.ok) {
+        return NextResponse.json({ valid: true, method: "tts" });
+      }
+      if (ttsRes.status === 401 || ttsRes.status === 403) {
+        return NextResponse.json({ valid: false, error: "API key unauthorized" });
+      }
+      const errBody = await ttsRes.text().catch(() => "");
+      return NextResponse.json({
+        valid: false,
+        error: `TTS request failed (${ttsRes.status})${errBody ? `: ${errBody.slice(0, 200)}` : ""}`,
+        method: "tts"
       });
     }
 

@@ -59,6 +59,18 @@ export async function getModelInfo(modelStr) {
       if (matchedEmbedding) {
         return { provider: matchedEmbedding.id, model: parsed.model };
       }
+
+      const sttNodes = await getProviderNodes({ type: "custom-stt" });
+      const matchedStt = sttNodes.find((node) => node.prefix === parsed.providerAlias);
+      if (matchedStt) {
+        return { provider: matchedStt.id, model: parsed.model };
+      }
+
+      const ttsNodes = await getProviderNodes({ type: "custom-tts" });
+      const matchedTts = ttsNodes.find((node) => node.prefix === parsed.providerAlias);
+      if (matchedTts) {
+        return { provider: matchedTts.id, model: parsed.model };
+      }
     }
     return {
       provider: parsed.provider,

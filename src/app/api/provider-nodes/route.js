@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createProviderNode, getProviderNodes } from "@/models";
-import { OPENAI_COMPATIBLE_PREFIX, ANTHROPIC_COMPATIBLE_PREFIX, CUSTOM_EMBEDDING_PREFIX } from "@/shared/constants/providers";
+import { OPENAI_COMPATIBLE_PREFIX, ANTHROPIC_COMPATIBLE_PREFIX, CUSTOM_EMBEDDING_PREFIX, CUSTOM_STT_PREFIX, CUSTOM_TTS_PREFIX } from "@/shared/constants/providers";
 import { generateId } from "@/shared/utils";
 
 export const dynamic = "force-dynamic";
@@ -71,6 +71,21 @@ export async function POST(request) {
       const node = await createProviderNode({
         id: `${CUSTOM_EMBEDDING_PREFIX}${generateId()}`,
         type: "custom-embedding",
+        prefix: prefix.trim(),
+        baseUrl: sanitizedBaseUrl,
+        name: name.trim(),
+      });
+      return NextResponse.json({ node }, { status: 201 });
+    }
+
+    // Self-hosted speech nodes (whisper.cpp, faster-whisper, Kokoro-FastAPI, ...).
+    // One node fronts several machines: each connection stores its own baseUrl.
+    if (nodeType === "custom-stt" || nodeType === "custom-tts") {
+      const sanitizedBaseUrl = (baseUrl || CUSTOM_EMBEDDING_DEFAULTS.baseUrl).trim().replace(/\/$/, "");
+
+      const node = await createProviderNode({
+        id: `${nodeType === "custom-stt" ? CUSTOM_STT_PREFIX : CUSTOM_TTS_PREFIX}${generateId()}`,
+        type: nodeType,
         prefix: prefix.trim(),
         baseUrl: sanitizedBaseUrl,
         name: name.trim(),

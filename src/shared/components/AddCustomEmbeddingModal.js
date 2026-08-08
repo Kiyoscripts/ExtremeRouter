@@ -6,9 +6,17 @@ import { Modal, Input, Button, Badge } from "@/shared/components";
 
 const DEFAULT_BASE_URL = "https://api.openai.com/v1";
 
-// Dual-mode modal: edit when `node` provided, add otherwise
-export default function AddCustomEmbeddingModal({ isOpen, onClose, onCreated, onSaved, node }) {
+const NODE_TYPE_INFO = {
+  "custom-embedding": { label: "Embedding", add: "Add Custom Embedding", edit: "Edit Custom Embedding", modelHint: "e.g. voyage-3, embed-english-v3.0, text-embedding-3-small", modelRequired: true },
+  "custom-stt": { label: "STT", add: "Add Custom STT", edit: "Edit Custom STT", modelHint: "e.g. whisper-large-v3, whisper-1", modelRequired: true },
+  "custom-tts": { label: "TTS", add: "Add Custom TTS", edit: "Edit Custom TTS", modelHint: "e.g. kokoro-v1, af_heart", modelRequired: false },
+};
+
+// Dual-mode modal: edit when `node` provided, add otherwise.
+// nodeType selects which self-hosted kind is created/validated.
+export default function AddCustomEmbeddingModal({ isOpen, onClose, onCreated, onSaved, node, nodeType = "custom-embedding" }) {
   const isEdit = !!node;
+  const info = NODE_TYPE_INFO[nodeType] || NODE_TYPE_INFO["custom-embedding"];
   const [formData, setFormData] = useState({
     name: "",
     prefix: "",
@@ -47,7 +55,7 @@ export default function AddCustomEmbeddingModal({ isOpen, onClose, onCreated, on
         prefix: formData.prefix,
         baseUrl: formData.baseUrl,
       };
-      if (!isEdit) payload.type = "custom-embedding";
+      if (!isEdit) payload.type = nodeType;
 
       const res = await fetch(url, {
         method,
@@ -60,7 +68,7 @@ export default function AddCustomEmbeddingModal({ isOpen, onClose, onCreated, on
         else onCreated?.(data.node);
       }
     } catch (error) {
-      console.log("Error saving custom embedding node:", error);
+      console.log("Error saving custom node:", error);
     } finally {
       setSubmitting(false);
     }
@@ -74,8 +82,8 @@ export default function AddCustomEmbeddingModal({ isOpen, onClose, onCreated, on
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           baseUrl: formData.baseUrl,
-          apiKey: checkKey,
-          type: "custom-embedding",
+          apiKey: checkKey || undefined,
+          type: nodeType,
           modelId: checkModelId.trim() || undefined,
         }),
       });
@@ -108,14 +116,14 @@ export default function AddCustomEmbeddingModal({ isOpen, onClose, onCreated, on
   };
 
   return (
-    <Modal isOpen={isOpen} title={isEdit ? "Edit Custom Embedding" : "Add Custom Embedding"} onClose={onClose}>
+    <Modal isOpen={isOpen} title={isEdit ? info.edit : info.add} onClose={onClose}>
       <div className="flex flex-col gap-4">
         <Input
           label="Name"
           value={formData.name}
           onChange={(e) => setFormData({ ...formData, name: e.target.value })}
           placeholder="Voyage AI"
-          hint="Required. A friendly label for this embedding provider."
+          hint="Required. A friendly label for this provider."
         />
         <Input
           label="Prefix"
@@ -128,26 +136,27 @@ export default function AddCustomEmbeddingModal({ isOpen, onClose, onCreated, on
           label="Base URL"
           value={formData.baseUrl}
           onChange={(e) => setFormData({ ...formData, baseUrl: e.target.value })}
-          placeholder="https://api.voyageai.com/v1"
-          hint="Most embedding APIs are OpenAI-compatible: Voyage, Cohere, Jina, Mistral, Together..."
+          placeholder="http://localhost:8000"
+          hint="Self-hosted OpenAI-compatible endpoint. One node can front several machines."
         />
         <Input
           label="API Key (for Check)"
           type="password"
           value={checkKey}
           onChange={(e) => setCheckKey(e.target.value)}
+          hint="Optional. Leave empty if your server runs keyless."
         />
         <Input
           label="Model ID (for Check)"
           value={checkModelId}
           onChange={(e) => setCheckModelId(e.target.value)}
-          placeholder="e.g. voyage-3, embed-english-v3.0, text-embedding-3-small"
-          hint="Required for validation. Will send a test embeddings request."
+          placeholder={info.modelHint}
+          hint={info.modelRequired ? "Required for validation. Will send a test request." : "Optional. Will send a test request."}
         />
         <div className="flex items-center gap-3">
           <Button
             onClick={handleValidate}
-            disabled={!checkKey || !checkModelId.trim() || validating || !formData.baseUrl.trim()}
+            disabled={!formData.baseUrl.trim() || (info.modelRequired && !checkModelId.trim()) || validating}
             variant="secondary"
           >
             {validating ? "Checking..." : "Check"}
@@ -180,4 +189,5 @@ AddCustomEmbeddingModal.propTypes = {
     prefix: PropTypes.string,
     baseUrl: PropTypes.string,
   }),
+  nodeType: PropTypes.oneOf(["custom-embedding", "custom-stt", "custom-tts"]),
 };
