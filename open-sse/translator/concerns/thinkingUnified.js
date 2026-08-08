@@ -165,7 +165,7 @@ function stripAll(body) {
 }
 
 // Apply unified thinking config to body in the resolved provider-native format.
-function applyFormat(fmt, body, cfg, caps) {
+function applyFormat(fmt, body, cfg, caps, model) {
   const none = cfg.mode === "none";
   const canDisable = caps.thinkingCanDisable !== false;
   // Model cannot disable thinking → clamp "none" to minimal effort instead.
@@ -218,9 +218,16 @@ function applyFormat(fmt, body, cfg, caps) {
     case "deepseek": {
       if (none && canDisable) { body.thinking = { type: "disabled" }; break; }
       body.thinking = { type: "enabled" };
-      // DeepSeek: low/medium→high, xhigh/max→max.
+      // DeepSeek V4 native tiers: low / high / max. Keep "low" native for V4
+      // models — v3 fallback only maps "minimal" to low and collapses the rest
+      // to high (the v3 API never exposed a low tier).
       const level = toLevel(eff);
-      body.reasoning_effort = level === "xhigh" || level === "max" ? "max" : "high";
+      const isV4 = /(^|\/)deepseek-v4/i.test(model);
+      body.reasoning_effort =
+        level === "xhigh" || level === "max" ? "max" :
+        level === "high" || level === "medium" ? "high" :
+        level === "low" ? "low" :
+        level === "minimal" ? (isV4 ? "low" : "high") : "high";
       break;
     }
     case "kimi": {
@@ -286,6 +293,6 @@ export function applyThinking(targetFormat, model, body, provider = null, intent
 
   const fmt = resolveFormat(targetFormat, cleanModel, provider);
   stripAll(body);
-  applyFormat(fmt, body, cfg, caps);
+  applyFormat(fmt, body, cfg, caps, cleanModel);
   return body;
 }

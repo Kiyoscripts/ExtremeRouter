@@ -19,6 +19,14 @@ export default {
     },
   },
   category: "apikey",
+  // DeepSeek V4 Pro / V4 Flash reasoning tiers: low / high / max via
+  // reasoning_effort. No "none"/medium on the wire for v4 — low is native,
+  // high is the default, max = extended thinking. See capabilities.js
+  // (*deepseek-v4* pattern, thinkingFormat "deepseek").
+  thinkingConfig: {
+    options: ["auto", "low", "high", "max"],
+    defaultMode: "auto",
+  },
   transport: {
     baseUrl: "https://api.deepseek.com/chat/completions",
     validateUrl: "https://api.deepseek.com/models",

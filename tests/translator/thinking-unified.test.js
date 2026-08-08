@@ -97,10 +97,26 @@ describe("applyThinking per provider format", () => {
     const out = apply("openai", "qwq-32b", { reasoning_effort: "none" }, "qwen");
     expect(out.enable_thinking).toBe(true);
   });
-  it("DeepSeek → enabled + reasoning_effort high (low→high)", () => {
+  it("DeepSeek V4 low → low (native tier)", () => {
     const out = apply("openai", "deepseek-v4-pro", { reasoning_effort: "low" }, "deepseek");
     expect(out.thinking).toEqual({ type: "enabled" });
+    expect(out.reasoning_effort).toBe("low");
+  });
+  it("DeepSeek V4 flash high → high", () => {
+    const out = apply("openai", "deepseek-v4-flash", { reasoning_effort: "high" }, "deepseek");
     expect(out.reasoning_effort).toBe("high");
+  });
+  it("DeepSeek V4 medium → high (no medium on wire)", () => {
+    const out = apply("openai", "deepseek-v4-pro", { reasoning_effort: "medium" }, "deepseek");
+    expect(out.reasoning_effort).toBe("high");
+  });
+  it("DeepSeek V4 max → max", () => {
+    const out = apply("openai", "deepseek-v4-pro", { reasoning_effort: "max" }, "deepseek");
+    expect(out.reasoning_effort).toBe("max");
+  });
+  it("DeepSeek V4 suffix (max) → max", () => {
+    const out = apply("openai", "deepseek-v4-pro(max)", {}, "deepseek");
+    expect(out.reasoning_effort).toBe("max");
   });
   it("Kimi on → reasoning_effort", () => {
     const out = apply("openai", "kimi-k2.6", { reasoning_effort: "high" }, "kimi");
