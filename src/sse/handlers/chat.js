@@ -323,6 +323,7 @@ async function dispatchResolvedCombo({ body, graph, clientRawRequest, request, a
       comboName,
       tuning: config.cascade,
       signal,
+      runBudget: budget,
     });
   }
 

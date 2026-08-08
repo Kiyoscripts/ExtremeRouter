@@ -2,13 +2,15 @@ import {
   extractApiKey, isValidApiKey,
   getProviderCredentials, markAccountUnavailable,
 } from "../services/auth.js";
-import { getSettings, getApiKeyByKey, getProviderNodes } from "@/lib/localDb";
+import { getSettings, getApiKeyByKey, getProviderNodes, getComboByName } from "@/lib/localDb";
 import { getModelInfo, getComboModels } from "../services/model.js";
 import { handleTtsCore } from "open-sse/handlers/ttsCore.js";
 import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import { AI_PROVIDERS, CUSTOM_TTS_PREFIX } from "@/shared/constants/providers";
 import { handleComboChat } from "open-sse/services/combo.js";
+import { buildComboExecutionGraph } from "../services/comboExecutionPolicy.js";
+import { createComboBudget } from "open-sse/services/comboBudget.js";
 import * as log from "../utils/logger.js";
 import { assertModelAllowed } from "../utils/modelAccess.js";
 
@@ -51,12 +53,24 @@ export async function handleTts(request) {
     if (denied) return denied;
   }
 
-  // Combo expansion: model may be a combo name → run fallback/round-robin across models
+  // Combo expansion: model may be a combo name → run fallback/round-robin across models.
+  // Gated through the same budget pre-flight as chat.js so media combos are subject
+  // to logical-call / cost caps before any provider call.
   const comboModels = await getComboModels(modelStr);
   if (comboModels) {
     const comboStrategies = settings.comboStrategies || {};
     const comboStrategy = comboStrategies[modelStr]?.fallbackStrategy || settings.comboStrategy || "fallback";
     const comboStickyLimit = settings.comboStickyRoundRobinLimit;
+
+    const combo = await getComboByName(modelStr);
+    let runBudget;
+    if (combo) {
+      const graph = await buildComboExecutionGraph(combo, comboStrategies[modelStr]);
+      const budget = createComboBudget({ body, config: graph.config, leaves: graph.leaves, logicalCalls: graph.logicalCalls });
+      if (!budget.ok) return errorResponse(HTTP_STATUS.BAD_REQUEST, `Combo budget rejected: ${budget.code}`);
+      runBudget = budget;
+    }
+
     log.info("TTS", `Combo "${modelStr}" with ${comboModels.length} models (strategy: ${comboStrategy}, sticky: ${comboStickyLimit})`);
     return handleComboChat({
       body,
@@ -66,6 +80,7 @@ export async function handleTts(request) {
       comboName: modelStr,
       comboStrategy,
       comboStickyLimit,
+      runBudget,
     });
   }
 

@@ -333,7 +333,7 @@ async function runManagerStrategy({ runId, body, managerModel, handleSingleModel
   }
 }
 
-async function dispatchWorkers({ runId, strategy, models, body, handleSingleModel, cfg, log }) {
+async function dispatchWorkers({ runId, strategy, models, body, handleSingleModel, cfg, log, runBudget }) {
   markStageStart(runId, "workers", { workerCount: strategy.subtasks.length });
   const subtasks = strategy.subtasks;
   const workerModels = models.filter(Boolean);
@@ -362,7 +362,14 @@ async function dispatchWorkers({ runId, strategy, models, body, handleSingleMode
           markWorkerStatus(runId, i, "error", { model: workerModel, status: res?.status });
           return { ok: false, text: "" };
         }
-        const text = extractPanelText(await res.clone().json().catch(() => ({})));
+        const rawText = extractPanelText(await res.clone().json().catch(() => ({})));
+        // Budget guard: clamp the worker's output so internal fan-out can never
+        // exceed the combo's output cap. Over-budget output is dropped (worker fail).
+        const text = runBudget ? runBudget.clampOutput(rawText) : rawText;
+        if (rawText && !text) {
+          markWorkerStatus(runId, i, "error", { model: workerModel, reason: "over_budget" });
+          return { ok: false, text: "" };
+        }
         markWorkerStatus(runId, i, "done", { model: workerModel, outputLen: text.length });
         return { ok: true, text, subtask };
       })
@@ -387,7 +394,7 @@ async function dispatchWorkers({ runId, strategy, models, body, handleSingleMode
   return outputs;
 }
 
-async function runStaffAudit({ runId, strategy, workerOutputs, staffModel, auditModel, body, handleSingleModel, cfg, log }) {
+async function runStaffAudit({ runId, strategy, workerOutputs, staffModel, auditModel, body, handleSingleModel, cfg, log, runBudget }) {
   const model = staffModel || auditModel;
   if (!model) {
     markStageDone(runId, "audit", { skipped: true });
@@ -412,7 +419,7 @@ async function runStaffAudit({ runId, strategy, workerOutputs, staffModel, audit
     }
     const text = extractPanelText(await res.clone().json().catch(() => ({})));
     markStageDone(runId, "audit", { reportLen: text.length });
-    return text;
+    return runBudget ? runBudget.clampOutput(text) : text;
   } catch (e) {
     log?.warn?.("SWARM", `Staff audit error: ${e?.message || e}`);
     markStageDone(runId, "audit", { skipped: true });
@@ -533,8 +540,8 @@ export async function handleSwarmChat({
 
     // ── Stage 2+3: Dispatch Workers (parallel) ──
     const workerOutputs = telemetry
-      ? await dispatchWorkers({ runId, strategy: { subtasks: effectiveSubtasks }, models: panel, body, handleSingleModel, cfg, log })
-      : (await dispatchWorkersNoTelemetry({ strategy: { subtasks: effectiveSubtasks }, models: panel, body, handleSingleModel, cfg, log }));
+      ? await dispatchWorkers({ runId, strategy: { subtasks: effectiveSubtasks }, models: panel, body, handleSingleModel, cfg, log, runBudget })
+      : (await dispatchWorkersNoTelemetry({ strategy: { subtasks: effectiveSubtasks }, models: panel, body, handleSingleModel, cfg, log, runBudget }));
 
     if (workerOutputs.length < cfg.minWorkers) {
       // Too few workers succeeded → fall back to direct answer from best worker or manager.
@@ -551,8 +558,8 @@ export async function handleSwarmChat({
 
     // ── Stage 4: Staff Audit ──
     const auditReport = telemetry
-      ? await runStaffAudit({ runId, strategy: { subtasks: effectiveSubtasks }, workerOutputs, staffModel, auditModel, body, handleSingleModel, cfg, log })
-      : (await runStaffAuditNoTelemetry({ strategy: { subtasks: effectiveSubtasks }, workerOutputs, staffModel, auditModel, body, handleSingleModel, cfg, log }));
+      ? await runStaffAudit({ runId, strategy: { subtasks: effectiveSubtasks }, workerOutputs, staffModel, auditModel, body, handleSingleModel, cfg, log, runBudget })
+      : (await runStaffAuditNoTelemetry({ strategy: { subtasks: effectiveSubtasks }, workerOutputs, staffModel, auditModel, body, handleSingleModel, cfg, log, runBudget }));
 
     // ── Stage 5: Manager Synthesis (STREAMED to client) ──
     const synthesisDirective = auditReport
@@ -651,7 +658,7 @@ async function runManagerStrategyNoTelemetry({ body, managerModel, handleSingleM
   }
 }
 
-async function dispatchWorkersNoTelemetry({ strategy, models, body, handleSingleModel, cfg }) {
+async function dispatchWorkersNoTelemetry({ strategy, models, body, handleSingleModel, cfg, log, runBudget }) {
   const workerModels = models.filter(Boolean);
   if (workerModels.length === 0) return [];
   // Parse JSON in the parallel .then() (like the telemetry path) instead of
@@ -665,7 +672,10 @@ async function dispatchWorkersNoTelemetry({ strategy, models, body, handleSingle
       .then(async (res) => {
         if (res?.__timeout || res?.__error) return { ok: false, text: "" };
         if (!res?.ok) return { ok: false, text: "" };
-        const text = extractPanelText(await res.clone().json().catch(() => ({})));
+        const rawText = extractPanelText(await res.clone().json().catch(() => ({})));
+        // Budget guard: clamp worker output; drop over-budget output (worker fail).
+        const text = runBudget ? runBudget.clampOutput(rawText) : rawText;
+        if (rawText && !text) return { ok: false, text: "" };
         return { ok: true, text, subtask };
       })
       .catch(() => ({ ok: false, text: "" }));
@@ -684,7 +694,7 @@ async function dispatchWorkersNoTelemetry({ strategy, models, body, handleSingle
   return outputs;
 }
 
-async function runStaffAuditNoTelemetry({ strategy, workerOutputs, staffModel, auditModel, body, handleSingleModel, cfg }) {
+async function runStaffAuditNoTelemetry({ strategy, workerOutputs, staffModel, auditModel, body, handleSingleModel, cfg, log, runBudget }) {
   const model = staffModel || auditModel;
   if (!model) return null;
   // Match by reference (same as telemetry path) — robust against duplicate ids.
@@ -697,7 +707,8 @@ async function runStaffAuditNoTelemetry({ strategy, workerOutputs, staffModel, a
   try {
     const res = await withTimeout(handleSingleModel(directiveBody, model, { isPanel: true, role: "audit" }), cfg.managerTimeoutMs);
     if (res?.__timeout || res?.__error) return null;
-    return extractPanelText(await res.clone().json().catch(() => ({})));
+    const text = extractPanelText(await res.clone().json().catch(() => ({})));
+    return runBudget ? runBudget.clampOutput(text) : text;
   } catch {
     return null;
   }

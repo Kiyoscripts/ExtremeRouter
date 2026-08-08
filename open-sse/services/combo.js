@@ -744,9 +744,10 @@ function stripConfidenceMarker(text) {
  * @param {string} options.comboName - combo name (logging)
  * @param {Object} [options.tuning] - override CASCADE_DEFAULTS
  * @param {AbortSignal} [options.signal] - run-level abort signal
+ * @param {Object} [options.runBudget] - combo output-budget guard (clamp per stage)
  * @returns {Promise<Response>}
  */
-export async function handleCascadeChat({ body, models, handleSingleModel, log, comboName, tuning, signal }) {
+export async function handleCascadeChat({ body, models, handleSingleModel, log, comboName, tuning, signal, runBudget }) {
   const panel = Array.isArray(models) ? models.filter(Boolean) : [];
   if (panel.length === 0) {
     return new Response(
@@ -831,6 +832,8 @@ export async function handleCascadeChat({ body, models, handleSingleModel, log, 
     try {
       const json = await res.clone().json().catch(() => ({}));
       text = extractPanelText(json);
+      // Budget guard: clamp stage output before it feeds the next escalation.
+      if (text && runBudget) text = runBudget.clampOutput(text);
     } catch { /* best-effort */ }
 
     const confidence = parseConfidence(text);
