@@ -11,12 +11,18 @@ import DonateModal from "./DonateModal";
 
 const navGroups = [
   {
-    label: "Gateway",
+    label: "Homepage",
     items: [
+      { href: "/dashboard/endpoint", label: "Endpoint", icon: "api" },
       { href: "/dashboard/overview", label: "Overview", icon: "dashboard" },
       { href: "/dashboard/playground", label: "Playground", icon: "science" },
-      { href: "/dashboard/endpoint", label: "Endpoint", icon: "api" },
+    ],
+  },
+  {
+    label: "Gateway",
+    items: [
       { href: "/dashboard/providers", label: "Providers", icon: "dns" },
+      { href: "/dashboard/media-providers", label: "Media Providers", icon: "perm_media" },
       { href: "/dashboard/combos", label: "Combos", icon: "layers" },
       { href: "/dashboard/token-saver", label: "Token Saver", icon: "savings" },
     ],
@@ -37,7 +43,6 @@ const navGroups = [
       { href: "/dashboard/cli-tools", label: "CLI Tools", icon: "terminal" },
       { href: "/dashboard/translator", label: "Translator", icon: "translate" },
       { href: "/dashboard/mitm", label: "MITM Proxy", icon: "security" },
-      { href: "/dashboard/media-providers", label: "Media Providers", icon: "perm_media" },
     ],
   },
   {
