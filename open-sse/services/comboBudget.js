@@ -20,7 +20,7 @@ export function createComboBudget({ body, config, leaves = [], logicalCalls = 1 
     estimatedCostUsd += inputTokens * (pricing.input / 1_000_000) + output * (pricing.output / 1_000_000);
   }
   if (logicalCalls > limits.maxLogicalCalls) return { ok: false, code: "combo_call_budget_exceeded", logicalCalls, limit: limits.maxLogicalCalls };
-  if (estimatedCostUsd > limits.maxEstimatedCostUsd) return { ok: false, code: "combo_cost_budget_exceeded", estimatedCostUsd, limit: limits.maxEstimatedCostUsd };
+  if (limits.enabled && estimatedCostUsd > limits.maxEstimatedCostUsd) return { ok: false, code: "combo_cost_budget_exceeded", estimatedCostUsd, limit: limits.maxEstimatedCostUsd };
 
   let aggregateOutputChars = 0;
   return {

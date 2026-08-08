@@ -122,13 +122,15 @@ export default function ComboCard({ combo, modelCaps = {}, activeProviders = [],
   // badge and the expanded editable control.
   const budgetUsd = resolveBudgetUsd(strategy);
   const isUnlimited = isUnlimitedBudget(strategy?.budgets?.maxEstimatedCostUsd);
-  const hasCustomBudget = strategy?.budgets?.maxEstimatedCostUsd != null && !isUnlimited && Number(strategy.budgets.maxEstimatedCostUsd) > 0;
+  const budgetEnabled = strategy?.budgets?.enabled === true; // default OFF
+  const hasCustomBudget = budgetEnabled && strategy?.budgets?.maxEstimatedCostUsd != null && !isUnlimited && Number(strategy.budgets.maxEstimatedCostUsd) > 0;
   const setBudgetUsd = (value) => {
     const n = Number(value);
     if (!Number.isFinite(n) || n <= 0) return;
     onSetStrategy({
       budgets: {
         ...(strategy.budgets || {}),
+        enabled: true,
         maxEstimatedCostUsd: n,
       },
     });
@@ -137,7 +139,16 @@ export default function ComboCard({ combo, modelCaps = {}, activeProviders = [],
     onSetStrategy({
       budgets: {
         ...(strategy.budgets || {}),
+        enabled: true,
         maxEstimatedCostUsd: "unlimited",
+      },
+    });
+  };
+  const setBudgetEnabled = (enabled) => {
+    onSetStrategy({
+      budgets: {
+        ...(strategy.budgets || {}),
+        enabled,
       },
     });
   };
@@ -210,18 +221,19 @@ export default function ComboCard({ combo, modelCaps = {}, activeProviders = [],
                   {thinkingType === "effort" ? thinking.effort || "on" : thinkingType}
                 </Badge>
               )}
-              {/* Cost budget highlight — lets users see a combo's per-request max
-                  budget at a glance. Uses `warning` (amber) accent so it stands
-                  out; stays amber even when custom so it reads as a spend guard. */}
-              <Badge
-                variant="warning"
-                size="sm"
-                className="flex items-center gap-0.5"
-                title={`Max cost budget: $${budgetUsd.toFixed(2)} per request`}
-              >
-                <span className="material-symbols-outlined text-[10px]">savings</span>
-                ${budgetUsd.toFixed(2)}
-              </Badge>
+              {/* Cost budget highlight — only when the budget limit is enabled.
+                  Off by default, so no badge shows for a combo with no guard. */}
+              {budgetEnabled && (
+                <Badge
+                  variant="warning"
+                  size="sm"
+                  className="flex items-center gap-0.5"
+                  title={`Max cost budget: $${budgetUsd.toFixed(2)} per request`}
+                >
+                  <span className="material-symbols-outlined text-[10px]">savings</span>
+                  ${budgetUsd.toFixed(2)}
+                </Badge>
+              )}
               <span className="text-[10px] text-text-muted">{models.length} models</span>
             </div>
             {/* Model chips — first 3 + "+N more" */}
@@ -571,12 +583,22 @@ export default function ComboCard({ combo, modelCaps = {}, activeProviders = [],
             <span className="font-medium">{getStrategyLabel(current)}:</span> {STRATEGY_OPTIONS.find(o => o.value === current)?.desc}
           </div>
 
-          {/* Cost budget control */}
+          {/* Cost budget control — on/off toggle + amount when enabled */}
           <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-warning/20 bg-warning/[0.04] px-3 py-2">
-            <div className="flex items-center gap-1.5">
+            <label className="flex items-center gap-1.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={budgetEnabled}
+                onChange={(e) => setBudgetEnabled(e.target.checked)}
+                className="rounded border accent-primary"
+                aria-label="Enable cost budget limit"
+              />
               <span className="material-symbols-outlined text-[16px] text-warning">savings</span>
-              <span className="text-[11px] font-semibold text-text-main">Max Budget</span>
-            </div>
+              <span className="text-[11px] font-semibold text-text-main">Budget Limit</span>
+            </label>
+            <span className="text-[10px] text-text-muted">
+              {budgetEnabled ? "enabled" : "off (no limit)"}
+            </span>
             <div className="flex items-center gap-1.5">
               <span className="text-[12px] font-medium text-text-muted">$</span>
               <input
@@ -585,14 +607,15 @@ export default function ComboCard({ combo, modelCaps = {}, activeProviders = [],
                 step={0.5}
                 value={isUnlimited ? "" : budgetUsd}
                 onChange={(e) => setBudgetUsd(e.target.value)}
-                disabled={isUnlimited}
+                disabled={!budgetEnabled || isUnlimited}
                 aria-label="Max cost budget in USD per request"
                 className="w-20 rounded border border-border bg-background px-1.5 py-0.5 text-[11px] font-mono text-right focus:outline-none focus:border-primary disabled:opacity-60"
               />
               <button
                 type="button"
                 onClick={isUnlimited ? () => setBudgetUsd(5) : setUnlimitedBudget}
-                className={`rounded border px-2 py-0.5 text-[11px] font-medium ${isUnlimited ? "border-primary bg-primary/10 text-primary" : "border-border text-text-muted hover:text-text-main"}`}
+                disabled={!budgetEnabled}
+                className={`rounded border px-2 py-0.5 text-[11px] font-medium ${isUnlimited ? "border-primary bg-primary/10 text-primary" : "border-border text-text-muted hover:text-text-main"} disabled:opacity-40 disabled:cursor-not-allowed`}
               >
                 {isUnlimited ? "Unlimited" : "∞"}
               </button>

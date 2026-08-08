@@ -121,6 +121,11 @@ export function normalizeComboStrategyConfig(raw = {}) {
       maxWorkers: asInt(swarmSource.maxWorkers, workerCount, 1, COMBO_LIMITS.maxWorkers),
     },
     budgets: {
+      // Budget limit toggle: default OFF. When off, comboBudget.js skips all
+      // cost/call/output caps so unlimited spending is allowed. When on, the
+      // numeric caps below apply. Defaults to false so legacy combos stay
+      // unlimited unless the user explicitly enables the guard.
+      enabled: budgetsSource.enabled === true,
       maxLogicalCalls: asInt(budgetsSource.maxLogicalCalls, COMBO_LIMITS.maxLogicalCalls, 1, COMBO_LIMITS.maxLogicalCalls),
       maxOutputChars: asInt(budgetsSource.maxOutputChars, COMBO_LIMITS.maxOutputChars, 1000, COMBO_LIMITS.maxOutputChars),
       maxAggregateOutputChars: asInt(budgetsSource.maxAggregateOutputChars, COMBO_LIMITS.maxAggregateOutputChars, 5000, COMBO_LIMITS.maxAggregateOutputChars),
