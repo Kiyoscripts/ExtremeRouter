@@ -37,7 +37,7 @@ const navGroups = [
       { href: "/dashboard/cli-tools", label: "CLI Tools", icon: "terminal" },
       { href: "/dashboard/translator", label: "Translator", icon: "translate" },
       { href: "/dashboard/mitm", label: "MITM Proxy", icon: "security" },
-      { href: "/dashboard/media-providers/image", label: "Media", icon: "perm_media" },
+      { href: "/dashboard/media-providers", label: "Media Providers", icon: "perm_media" },
     ],
   },
   {
