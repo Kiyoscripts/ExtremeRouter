@@ -130,7 +130,7 @@ export default function MediaProvidersPage() {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
-        title="Service Providers"
+        title="Media Providers"
         description="Text to Image, speech-to-text, and text-to-speech providers"
         icon="perm_media"
       />
