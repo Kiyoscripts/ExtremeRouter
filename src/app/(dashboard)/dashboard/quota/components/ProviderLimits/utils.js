@@ -560,6 +560,25 @@ export function parseQuotaData(provider, data) {
         }
         break;
       }
+      case "kimi-desktop": {
+        // Kimi Desktop — subscription + gift usage from the membership RPC,
+        // normalized to percent-used rows (handler sends used/total as 0-100).
+        if (data.quotas) {
+          Object.entries(data.quotas).forEach(([name, quota]) => {
+            normalizedQuotas.push({
+              name: quota.name || (name === "subscription" ? "Subscription" : name),
+              used: quota.used || 0,
+              total: quota.total || 0,
+              remainingPercentage: quota.remainingPercentage,
+              resetAt: quota.resetAt || null,
+              unit: quota.unit,
+              recurring: quota.recurring !== false,
+              unlimited: false,
+            });
+          });
+        }
+        break;
+      }
       case "kimchi": {
         // Kimchi — credit balance (absolute) + USD budget progress.
         // `credits` has no total → no percentage (info row); `budget` drives

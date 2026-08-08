@@ -2,8 +2,8 @@
  * GET /api/oauth/kimi-desktop/quota
  *
  * Returns the current quota view for the Kimi desktop connection (tier, usage
- * detail, my quota). Reads the local desktop token store — the same file the
- * auto-import flow uses.
+ * detail, my quota). Prefers the LIVE membership stats from www.kimi.com
+ * (Connect-RPC with the desktop JWT) and falls back to the local token store.
  */
 import { NextResponse } from "next/server";
 import { getKimiDesktopQuota } from "@/lib/oauth/services/kimi-desktop-quota";

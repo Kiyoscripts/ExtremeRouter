@@ -25,6 +25,7 @@ import { getClineUsage } from "./usage/cline.js";
 import { getGrokWebUsage } from "./usage/grok-web.js";
 import { getInfronUsage } from "./usage/infron.js";
 import { getKimchiUsage } from "./usage/kimchi.js";
+import { getKimiDesktopUsage } from "./usage/kimi-desktop.js";
 
 /**
  * Get usage data for a provider connection
@@ -58,6 +59,8 @@ const USAGE_HANDLERS = {
   "grok-web": (c) => getGrokWebUsage({ apiKey: c.apiKey }, c.proxyOptions),
   infron: (c) => getInfronUsage({ apiKey: c.apiKey }, c.proxyOptions),
   kimchi: (c) => getKimchiUsage(c.accessToken, c.proxyOptions),
+  // kimi-desktop stores the kimi-auth JWT as apiKey (oauth import route)
+  "kimi-desktop": (c) => getKimiDesktopUsage(c.apiKey, c.proxyOptions),
 };
 
 export async function getUsageForProvider(connection, proxyOptions = null) {
