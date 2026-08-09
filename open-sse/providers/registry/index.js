@@ -157,6 +157,7 @@ import p155 from "./unimodel.js";
 import p156 from "./inferx.js";
 import p157 from "./novita.js";
 import p158 from "./kimi-desktop.js";
+import p161 from "./tokenharbor.js";
 
 export default [
   p0,
@@ -317,4 +318,5 @@ export default [
   p156,
   p157,
   p158,
+  p161,
 ];

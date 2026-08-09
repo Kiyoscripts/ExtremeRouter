@@ -135,6 +135,13 @@ export const PROVIDER_CAPABILITIES = {
     "deepseek-v4-flash":  { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1000000, maxOutput: 50000 },
     "deepseek-v3-2-volc": { reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 96000, maxOutput: 32000 },
   },
+  // tokenharbor — AI gateway; pin the Claude 5 flagships to claude-adaptive 1M
+  // so the generic *claude*opus*/*claude*fable* pattern (claude-budget 200k)
+  // can't win for these models.
+  tokenharbor: {
+    "claude-opus-5":  { vision: true, reasoning: true, search: true, thinkingFormat: "claude-adaptive", contextWindow: 1000000, maxOutput: 128000 },
+    "claude-fable-5": { vision: true, reasoning: true, search: true, thinkingFormat: "claude-adaptive", contextWindow: 1000000, maxOutput: 128000 },
+  },
 };
 
 /**

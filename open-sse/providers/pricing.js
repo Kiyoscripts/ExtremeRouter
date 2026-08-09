@@ -290,6 +290,20 @@ export const PROVIDER_PRICING = {
     "z-ai/glm-5.1": { input: 1.05, output: 3.5, cached: 0.525, reasoning: 3.5 },
     "z-ai/glm-5.2": { input: 1.4, output: 4.4, cached: 0.26, reasoning: 4.4 },
   },
+  // TokenHarbor (tokenharbor) — AI model gateway. User price table (input·output
+  // per 1M tokens); pinned reasoning tier for reasoning models.
+  tokenharbor: {
+    "claude-opus-5":   { input: 5, output: 25, cached: 0.5, reasoning: 25 },
+    "claude-fable-5":  { input: 10, output: 50, cached: 1.0, reasoning: 50 },
+    "gpt-5.6-sol":     { input: 5, output: 30, cached: 0.5, reasoning: 30 },
+    "kimi-k3":         { input: 3, output: 15, cached: 0.3, reasoning: 15 },
+    "qwen3.8-max":     { input: 2, output: 6, cached: 0.25, reasoning: 6 },
+    "gpt-5.6-terra":   { input: 2, output: 12, cached: 0.2, reasoning: 12 },
+    "grok-4.5":        { input: 2, output: 6, cached: 0.2, reasoning: 6 },
+    "claude-sonnet-5": { input: 2, output: 10, cached: 0.2, reasoning: 10 },
+    "glm-5.2":         { input: 1.4, output: 4.4, cached: 0.26, reasoning: 4.4 },
+    "gemini-3.6-flash": { input: 1.5, output: 7.5, cached: 0.15, reasoning: 7.5 },
+  },
 };
 
 /**
