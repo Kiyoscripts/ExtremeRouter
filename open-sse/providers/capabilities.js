@@ -47,6 +47,7 @@ export const DEFAULT_CAPABILITIES = {
   thinkingCanDisable: true,  // false → model cannot turn thinking off (clamp to min instead of disable)
   thinkingRange: null,       // { min, max } for budget formats; null = no clamp
   thinkingMaxEffort: false,  // true → supports "max" reasoning_effort (e.g. gpt-5.6-sol)
+  thinkingLevels: null,      // explicit valid reasoning_effort list (e.g. ["low","medium","high"]); null = all levels
   // limits (tokens)
   contextWindow: 200000,
   maxOutput: 64000,
@@ -177,7 +178,9 @@ export const PATTERN_CAPABILITIES = [
   { pattern: "*gpt-5.6-luna*", caps: { reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 272000, maxOutput: 128000 } },
 
   // ── Moonshot / Kimi K3 (reasoning, supports max effort) ──────────
-  { pattern: "*kimi-k3*",      caps: { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 262144, maxOutput: 65536, thinkingMaxEffort: true } },
+  // K3 reasoning + Preserved Thinking always on (can't disable), native tiers
+  // low/high/max only (default max). See moonshot.js registry note.
+  { pattern: "*kimi-k3*",      caps: { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, thinkingLevels: ["low", "high", "max"], thinkingMaxEffort: true, contextWindow: 262144, maxOutput: 65536 } },
   { pattern: "*gpt-5*codex*",   caps: { reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 400000, maxOutput: 128000 } },
   { pattern: "*gpt-5*",         caps: { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 400000, maxOutput: 128000 } },
   { pattern: "*gpt-4o*",        caps: { vision: true, search: true, contextWindow: 128000, maxOutput: 16384 } },
@@ -272,6 +275,8 @@ export const PATTERN_CAPABILITIES = [
   { pattern: "*perplexity*",    caps: { search: true, contextWindow: 128000 } },
 
   // ── Others ───────────────────────────────────────────────────────
+  { pattern: "*laguna-s-2.1*",  caps: { reasoning: true, thinkingFormat: "openai", thinkingLevels: ["low", "medium", "high"], contextWindow: 128000 } },
+  { pattern: "*step-3.7*",      caps: { reasoning: true, thinkingFormat: "step", thinkingLevels: ["low", "medium", "high"], contextWindow: 256000 } },
   { pattern: "*hunyuan*",       caps: { reasoning: true, thinkingFormat: "hunyuan", contextWindow: 262144, maxOutput: 262144 } },
   { pattern: "hy3*",            caps: { reasoning: true, thinkingFormat: "hunyuan", contextWindow: 262144, maxOutput: 262144 } },
   { pattern: "*step-*",         caps: { reasoning: true, thinkingFormat: "step", contextWindow: 128000 } },

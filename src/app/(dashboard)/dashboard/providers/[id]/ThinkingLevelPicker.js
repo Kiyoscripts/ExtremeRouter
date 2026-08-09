@@ -42,8 +42,10 @@ export default function ThinkingLevelPicker({ caps, selectedLevel, onSelect }) {
   }, [open]);
 
   // Build the option list based on model capabilities.
+  const allowed = caps?.thinkingLevels;
   const options = ALL_LEVELS.filter((opt) => {
     if (opt.value === "auto") return true;
+    if (allowed) return allowed.includes(opt.value);
     if (opt.value === "none") return caps?.thinkingCanDisable !== false;
     // "max" reasoning_effort is only supported by specific models (e.g. gpt-5.6-sol).
     // Other models reject it — hide from picker unless thinkingMaxEffort is set.

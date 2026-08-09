@@ -139,6 +139,18 @@ function toGeminiThinkingLevel(cfg) {
   return effortToThinkingLevel(raw);
 }
 
+// Clamp a level into an explicit allowed list (caps.thinkingLevels). Picks the
+// first valid level at-or-above the requested one, else the highest (e.g. kimi-k3
+// [low,high,max]: minimal→low, medium→high, xhigh→max).
+function clampToLevels(level, list) {
+  if (!list || !Array.isArray(list) || !level || list.includes(level)) return level;
+  const ORDER = ["minimal", "low", "medium", "high", "xhigh", "max"];
+  const rank = ORDER.indexOf(level);
+  const valid = list.filter((l) => ORDER.includes(l)).sort((a, b) => ORDER.indexOf(a) - ORDER.indexOf(b));
+  if (!valid.length) return level;
+  return valid.find((l) => ORDER.indexOf(l) >= rank) || valid[valid.length - 1];
+}
+
 // Gemini nests thinkingConfig under generationConfig. gemini-cli / antigravity wrap
 // the whole request in a { request: { generationConfig } } envelope — target the
 // envelope's generationConfig when present, else the top-level one.
@@ -175,7 +187,7 @@ function applyFormat(fmt, body, cfg, caps, model) {
     case "openai": {
       if (none && canDisable) { body.reasoning_effort = "none"; break; }
       const level = toLevel(eff);
-      if (level && level !== "auto") body.reasoning_effort = level;
+      if (level && level !== "auto") body.reasoning_effort = clampToLevels(level, caps.thinkingLevels);
       else delete body.reasoning_effort;
       break;
     }

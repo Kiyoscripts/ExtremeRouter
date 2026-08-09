@@ -154,6 +154,49 @@ describe("applyThinking per provider format", () => {
     const out = apply("openai", "kimi-k2.6(xhigh)", {}, "kimi");
     expect(out.reasoning_effort).toBe("high");
   });
+  // ── Kimi K3: reasoning always on, native tiers low/high/max ────────
+  it("Kimi K3 low → low (native tier)", () => {
+    const out = apply("openai", "kimi-k3", { reasoning_effort: "low" }, "moonshot");
+    expect(out.reasoning_effort).toBe("low");
+  });
+  it("Kimi K3 medium → high (no medium on wire)", () => {
+    const out = apply("openai", "kimi-k3", { reasoning_effort: "medium" }, "moonshot");
+    expect(out.reasoning_effort).toBe("high");
+  });
+  it("Kimi K3 max → max (native tier)", () => {
+    const out = apply("openai", "kimi-k3", { reasoning_effort: "max" }, "moonshot");
+    expect(out.reasoning_effort).toBe("max");
+  });
+  it("Kimi K3 none → clamps to low (always-on thinking)", () => {
+    const out = apply("openai", "kimi-k3", { reasoning_effort: "none" }, "moonshot");
+    expect(out.reasoning_effort).toBe("low");
+  });
+  // ── Laguna S 2.1: OpenAI-compatible, native tiers low/medium/high ──
+  it("Laguna low → low", () => {
+    const out = apply("openai", "poolside/laguna-s-2.1:free", { reasoning_effort: "low" }, "cline");
+    expect(out.reasoning_effort).toBe("low");
+  });
+  it("Laguna max → high (no max on wire)", () => {
+    const out = apply("openai", "poolside/laguna-s-2.1:free", { reasoning_effort: "max" }, "cline");
+    expect(out.reasoning_effort).toBe("high");
+  });
+  it("Laguna medium → medium (pass-through)", () => {
+    const out = apply("openai", "poolside/laguna-s-2.1:free", { reasoning_effort: "medium" }, "cline");
+    expect(out.reasoning_effort).toBe("medium");
+  });
+  // ── Step 3.7: native tiers low/medium/high ─────────────────────────
+  it("Step 3.7 low → low (native tier)", () => {
+    const out = apply("openai", "step-3.7-flash", { reasoning_effort: "low" }, "stepfun");
+    expect(out.reasoning_effort).toBe("low");
+  });
+  it("Step 3.7 high → high (pass-through)", () => {
+    const out = apply("openai", "step-3.7-flash", { reasoning_effort: "high" }, "stepfun");
+    expect(out.reasoning_effort).toBe("high");
+  });
+  it("Step 3.7 max → high (no max on wire)", () => {
+    const out = apply("openai", "step-3.7-flash", { reasoning_effort: "max" }, "stepfun");
+    expect(out.reasoning_effort).toBe("high");
+  });
   // ── Step normalization (minimal→low, xhigh/max→high, auto→omit) ──
   it("Step minimal → low (enum normalization)", () => {
     const out = apply("openai", "step-3-flash", { reasoning_effort: "minimal" }, "step");

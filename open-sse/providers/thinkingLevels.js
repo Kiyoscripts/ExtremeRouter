@@ -63,6 +63,10 @@ export function getThinkingLevels(provider, model) {
   const hit = PATTERN_THINKING.find((p) => matchPattern(p.pattern, model));
   if (hit) return hit.levels;
 
+  // Explicit per-model level list (caps.thinkingLevels) wins — e.g. kimi-k3
+  // ["low","high","max"], laguna-s-2.1 / step-3.7 ["low","medium","high"].
+  if (Array.isArray(caps.thinkingLevels)) return caps.thinkingLevels;
+
   // Generic fallback for non-Kiro reasoning models.
   if (caps.thinkingMaxEffort) return L.EFFORT_MAX;
   return L.EFFORT;
