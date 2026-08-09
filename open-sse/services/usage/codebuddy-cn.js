@@ -1,8 +1,6 @@
 /**
- * CodeBuddy CN usage handler
- *
- * Scoped to the "codebuddy-cn" provider specifically — a future "codebuddy-intl"
- * variant would get its own handler/endpoint, so keep this CN-only.
+ * CodeBuddy-family usage handler (shared by codebuddy-cn, codebuddy-intl,
+ * workbuddy — same Tencent billing shape on each host).
  *
  * Quota lives behind a Tencent billing endpoint (POST, payload wrapped twice
  * under data.Response.Data). It mixes two credit types that must NOT be merged:
@@ -23,8 +21,6 @@ import { proxyAwareFetch } from "../../utils/proxyFetch.js";
 import { PROVIDERS } from "../../providers/index.js";
 import { U, parseResetTime } from "./shared.js";
 
-const PROVIDER_ID = "codebuddy-cn";
-
 // Prefer the *Precise string fields (exact), fall back to the numeric ones.
 function num(precise, plain) {
   const n = Number(precise ?? plain);
@@ -43,40 +39,54 @@ function refillCadence(acc) {
   return "Monthly";
 }
 
-export async function getCodeBuddyCnUsage(accessToken, apiKey, providerSpecificData, proxyOptions = null) {
+// get-user-resource paginated payload (matches the WorkBuddy desktop capture).
+const WORKBUDDY_PAGED_BODY = {
+  PageNumber: 1,
+  PageSize: 100,
+  ProductCode: "p_tcaca",
+  Status: [0, 3],
+  OnlyValidPeriod: true,
+};
+
+export async function getCodebuddyUsage(providerId, accessToken, apiKey, proxyOptions = null) {
   const token = accessToken || apiKey;
   if (!token) {
-    return { message: "CodeBuddy CN credential not available." };
+    return { message: "CodeBuddy credential not available." };
+  }
+  const url = U(providerId).url;
+  if (!url) {
+    return { message: "CodeBuddy quota endpoint not configured." };
   }
 
   try {
-    const response = await proxyAwareFetch(U(PROVIDER_ID).url, {
+    const response = await proxyAwareFetch(url, {
       method: "POST",
       headers: {
-        ...(PROVIDERS[PROVIDER_ID]?.headers || {}),
+        ...(PROVIDERS[providerId]?.headers || {}),
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
         Accept: "application/json",
       },
-      body: "{}",
+      // WorkBuddy paginates by p_tcaca; CN/intl accept the empty object too.
+      body: providerId === "workbuddy" ? JSON.stringify(WORKBUDDY_PAGED_BODY) : "{}",
     }, proxyOptions);
 
     if (response.status === 401 || response.status === 403) {
-      return { message: "CodeBuddy CN credential invalid or expired." };
+      return { message: "CodeBuddy credential invalid or expired." };
     }
     if (!response.ok) {
-      return { message: `CodeBuddy CN quota API error (${response.status}).` };
+      return { message: `CodeBuddy quota API error (${response.status}).` };
     }
 
     const json = await response.json();
     if (json?.code !== 0) {
-      return { message: `CodeBuddy CN quota error: ${json?.msg || "unknown"}` };
+      return { message: `CodeBuddy quota error: ${json?.msg || "unknown"}` };
     }
 
     const data = json?.data?.Response?.Data || {};
     const accounts = Array.isArray(data.Accounts) ? data.Accounts : [];
     if (accounts.length === 0) {
-      return { message: "CodeBuddy CN connected. No credit package found." };
+      return { message: "CodeBuddy connected. No credit package found." };
     }
 
     const cycleEndMs = (acc) => {
@@ -129,10 +139,14 @@ export async function getCodeBuddyCnUsage(accessToken, apiKey, providerSpecificD
     });
 
     const basePkg = refills[0] || accounts[0] || {};
-    const plan = basePkg.PackageName || basePkg.SubProductName || "CodeBuddy CN";
+    const plan = basePkg.PackageName || basePkg.SubProductName || "CodeBuddy";
 
     return { plan, quotas };
   } catch (error) {
-    return { message: `CodeBuddy CN error: ${error.message}` };
+    return { message: `CodeBuddy error: ${error.message}` };
   }
 }
+
+// Backward-compatible alias for the legacy CN-only name (usage.js + tests).
+export const getCodeBuddyCnUsage = (accessToken, apiKey, providerSpecificData, proxyOptions = null) =>
+  getCodebuddyUsage("codebuddy-cn", accessToken, apiKey, proxyOptions);

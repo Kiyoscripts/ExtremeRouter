@@ -130,7 +130,9 @@ const REFRESH_HANDLERS = {
   github: (c, log) => refreshGitHubToken(c.refreshToken, log),
   kiro: (c, log) => refreshKiroToken(c.refreshToken, c.providerSpecificData, log),
   xai: (c, log) => refreshXaiToken(c.refreshToken, log),
-  "codebuddy-cn": (c, log) => refreshCodebuddyToken(c.refreshToken, log),
+  "codebuddy-cn": (c, log) => refreshCodebuddyToken(c.refreshToken, log, "codebuddy-cn"),
+  "codebuddy-intl": (c, log) => refreshCodebuddyToken(c.refreshToken, log, "codebuddy-intl"),
+  workbuddy: (c, log) => refreshCodebuddyToken(c.refreshToken, log, "workbuddy"),
   zed: (c, log) => refreshZedLlmToken(c.refreshToken, c.providerSpecificData, log),
   vertex: vertexRefreshHandler,
   "vertex-partner": vertexRefreshHandler

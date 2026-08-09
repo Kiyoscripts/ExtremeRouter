@@ -10,7 +10,7 @@ import { getCodexUsage, consumeCodexRateLimitResetCredit, getCodexRateLimitReset
 export { consumeCodexRateLimitResetCredit, getCodexRateLimitResetCredits };
 import { getKiroUsage } from "./usage/kiro.js";
 import { getMiniMaxUsage } from "./usage/minimax.js";
-import { getCodeBuddyCnUsage } from "./usage/codebuddy-cn.js";
+import { getCodeBuddyCnUsage, getCodebuddyUsage } from "./usage/codebuddy-cn.js";
 import {
   getQwenUsage,
   getIflowUsage,
@@ -50,6 +50,8 @@ const USAGE_HANDLERS = {
   "minimax-cn": (c) => getMiniMaxUsage(c.apiKey, c.provider, c.proxyOptions),
   "vercel-ai-gateway": (c) => getVercelAiGatewayUsage(c.apiKey, c.proxyOptions),
   "codebuddy-cn": (c) => getCodeBuddyCnUsage(c.accessToken, c.apiKey, c.providerSpecificData, c.proxyOptions),
+  "codebuddy-intl": (c) => getCodebuddyUsage("codebuddy-intl", c.accessToken, c.apiKey, c.proxyOptions),
+  workbuddy: (c) => getCodebuddyUsage("workbuddy", c.accessToken, c.apiKey, c.proxyOptions),
   xai: (c) => getXaiUsage(c, c.proxyOptions),
   tokenrouter: (c) => getTokenRouterUsage(c, c.providerSpecificData, c.proxyOptions),
   // Cline + ClinePass share the same upstream host and plan-limits endpoint;

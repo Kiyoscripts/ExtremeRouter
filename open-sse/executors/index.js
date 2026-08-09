@@ -82,7 +82,9 @@ const executors = {
   "xiaomi-tokenplan": new XiaomiTokenplanExecutor(),
   "mimo-free": new MimoFreeExecutor(),
   mmf: new MimoFreeExecutor(), // Alias for mimo-free
-  "codebuddy-cn": new CodeBuddyExecutor(),
+  "codebuddy-cn": new CodeBuddyExecutor("codebuddy-cn"),
+  "codebuddy-intl": new CodeBuddyExecutor("codebuddy-intl"),
+  workbuddy: new CodeBuddyExecutor("workbuddy"),
   devin: new DevinExecutor(),
   "chatglm-cn": new ChatGLMExecutor(),
   // Web-cookie providers (ported from OmniRoute)

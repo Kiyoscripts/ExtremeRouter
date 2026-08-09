@@ -4,6 +4,27 @@
 import { describe, it, expect } from "vitest";
 import { CodeBuddyExecutor } from "../../open-sse/executors/codebuddy-cn.js";
 
+describe("WorkBuddy executor stream_model injection", () => {
+  const wb = new CodeBuddyExecutor("workbuddy");
+
+  it("mirrors stream_model from the model for workbuddy requests", () => {
+    const out = wb.transformRequest("hy3", { messages: [{ role: "user", content: "hi" }] }, false, {});
+    expect(out.stream).toBe(true);
+    expect(out.stream_model).toBe("hy3");
+  });
+
+  it("does not clobber an explicit client stream_model", () => {
+    const out = wb.transformRequest("hy3", { messages: [], stream_model: "kimi-k2.6" }, false, {});
+    expect(out.stream_model).toBe("kimi-k2.6");
+  });
+
+  it("codebuddy-cn/intl never inject stream_model", () => {
+    const cb = new CodeBuddyExecutor("codebuddy-intl");
+    const out = cb.transformRequest("glm-5.1", { messages: [{ role: "user", content: "hi" }] }, false, {});
+    expect(out.stream_model).toBeUndefined();
+  });
+});
+
 describe("CodeBuddyExecutor reasoning params are opt-in (#2071)", () => {
   const exec = new CodeBuddyExecutor();
 

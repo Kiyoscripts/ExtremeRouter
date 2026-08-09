@@ -158,6 +158,8 @@ import p156 from "./inferx.js";
 import p157 from "./novita.js";
 import p158 from "./kimi-desktop.js";
 import p161 from "./tokenharbor.js";
+import p159 from "./workbuddy.js";
+import p160 from "./codebuddy-intl.js";
 
 export default [
   p0,
@@ -319,4 +321,6 @@ export default [
   p157,
   p158,
   p161,
+  p159,
+  p160,
 ];

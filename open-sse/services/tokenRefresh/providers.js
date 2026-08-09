@@ -587,13 +587,14 @@ export async function refreshCopilotToken(githubAccessToken, log) {
   }, log);
 }
 
-// CodeBuddy (Tencent) refresh — POST /v2/plugin/auth/token/refresh with the
-// refresh token carried in the X-Refresh-Token header (not a form body),
-// matching the official CodeBuddy CLI. Response: { code: 0, data: <token> }.
-export async function refreshCodebuddyToken(refreshToken, log) {
+// CodeBuddy-family (Tencent) refresh — POST /v2/plugin/auth/token/refresh with
+// the refresh token carried in the X-Refresh-Token header (not a form body),
+// matching the official CodeBuddy CLI. Shared by codebuddy-cn, codebuddy-intl
+// and workbuddy (same contract per host). Response: { code: 0, data: <token> }.
+export async function refreshCodebuddyToken(refreshToken, log, providerId = "codebuddy-cn") {
   if (!refreshToken) return null;
-  return dedupRefresh("codebuddy-cn", refreshToken, async () => {
-    const oauth = PROVIDER_OAUTH["codebuddy-cn"] || {};
+  return dedupRefresh(providerId, refreshToken, async () => {
+    const oauth = PROVIDER_OAUTH[providerId] || {};
     const response = await _refreshFetch(oauth.refreshUrl, {
       method: "POST",
       headers: {
@@ -601,7 +602,7 @@ export async function refreshCodebuddyToken(refreshToken, log) {
         Accept: "application/json",
         "User-Agent": oauth.userAgent,
         "X-Requested-With": "XMLHttpRequest",
-        "X-Domain": "copilot.tencent.com",
+        "X-Domain": oauth.baseUrl?.replace(/^https?:\/\//, "") || "copilot.tencent.com",
         "X-Refresh-Token": refreshToken,
         "X-Auth-Refresh-Source": "plugin",
         "X-Product": "SaaS",

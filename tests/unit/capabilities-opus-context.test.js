@@ -48,3 +48,20 @@ describe("context/maxOutput windows for kimi-k3, laguna-s-2.1, step-3.7", () => 
     expect(getCapabilitiesForModel("stepfun", "step-3.7-flash")).toMatchObject({ contextWindow: 256000, maxOutput: 256000 });
   });
 });
+
+// CodeBuddy-family gateways (codebuddy-intl / workbuddy) resolve every model to
+// OpenAI-style reasoning_effort — including WorkBuddy's flagship "hy3" model,
+// which must NOT fall through to the generic *hy3* hunyuan pattern.
+describe("codebuddy-intl + workbuddy capabilities", () => {
+  it("workbuddy hy3 → openai reasoning, not hunyuan", () => {
+    const c = getCapabilitiesForModel("workbuddy", "hy3");
+    expect(c.reasoning).toBe(true);
+    expect(c.thinkingFormat).toBe("openai");
+    expect(c.thinkingCanDisable).toBe(false);
+  });
+  it("codebuddy-intl mirrors codebuddy-cn caps (glm-5.1 → 200k openai)", () => {
+    const c = getCapabilitiesForModel("codebuddy-intl", "glm-5.1");
+    expect(c.thinkingFormat).toBe("openai");
+    expect(c.contextWindow).toBe(200000);
+  });
+});

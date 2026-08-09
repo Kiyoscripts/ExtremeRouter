@@ -1,7 +1,8 @@
 import { DefaultExecutor } from "./default.js";
 
 /**
- * CodeBuddyExecutor — talks to https://copilot.tencent.com/v2/chat/completions
+ * CodeBuddyExecutor — talks to the CodeBuddy-family /v2/chat/completions
+ * gateway (codebuddy-cn, codebuddy-intl, workbuddy in real enterprise, etc).
  *
  * CodeBuddy is OpenAI-compatible but rejects non-stream chat requests
  * (HTTP 400, code 11101 "Non-stream chat request is currently not supported").
@@ -10,13 +11,21 @@ import { DefaultExecutor } from "./default.js";
  * SSE into a JSON response for non-streaming clients.
  */
 export class CodeBuddyExecutor extends DefaultExecutor {
-  constructor() {
-    super("codebuddy-cn");
+  constructor(provider = "codebuddy-cn") {
+    super(provider);
   }
 
   transformRequest(model, body, stream, credentials) {
     const transformed = super.transformRequest(model, body, stream, credentials);
     transformed.stream = true;
+
+    // WorkBuddy's gateway picks the actual inference model via `stream_model`
+    // (captured from the desktop client: body carries { model:"hy3",
+    // stream_model:"hy3" }). Mirror it so the wire body matches what the
+    // official client sends.
+    if (this.provider === "workbuddy" && model && !transformed.stream_model) {
+      transformed.stream_model = model;
+    }
 
     // CodeBuddy only surfaces model reasoning when the request carries the CLI's
     // OpenAI-style params: reasoning_effort + reasoning_summary:"auto". extremerouter's

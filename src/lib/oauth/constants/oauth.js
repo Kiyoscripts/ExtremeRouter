@@ -123,6 +123,11 @@ export const GITLAB_CONFIG = { ...PROVIDER_OAUTH["gitlab"] };
 // CodeBuddy (Tencent) OAuth Configuration (Browser OAuth Polling Flow)
 export const CODEBUDDY_CONFIG = { ...PROVIDER_OAUTH["codebuddy-cn"] };
 
+// CodeBuddy intl (codebuddy.ai) + WorkBuddy (workbuddy.ai) — same /v2/plugin
+// polling contract on their own hosts.
+export const CODEBUDDY_CONFIG_INTL = { ...PROVIDER_OAUTH["codebuddy-intl"] };
+export const CODEBUDDY_CONFIG_WORKBUDDY = { ...PROVIDER_OAUTH["workbuddy"] };
+
 // Kimchi OAuth Configuration (Browser token callback flow)
 export const KIMCHI_CONFIG = { ...PROVIDER_OAUTH["kimchi"] };
 
