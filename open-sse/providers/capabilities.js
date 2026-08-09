@@ -180,7 +180,7 @@ export const PATTERN_CAPABILITIES = [
   // ── Moonshot / Kimi K3 (reasoning, supports max effort) ──────────
   // K3 reasoning + Preserved Thinking always on (can't disable), native tiers
   // low/high/max only (default max). See moonshot.js registry note.
-  { pattern: "*kimi-k3*",      caps: { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, thinkingLevels: ["low", "high", "max"], thinkingMaxEffort: true, contextWindow: 262144, maxOutput: 65536 } },
+  { pattern: "*kimi-k3*",      caps: { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, thinkingLevels: ["low", "high", "max"], thinkingMaxEffort: true, contextWindow: 1048576, maxOutput: 1048576 } },
   { pattern: "*gpt-5*codex*",   caps: { reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 400000, maxOutput: 128000 } },
   { pattern: "*gpt-5*",         caps: { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 400000, maxOutput: 128000 } },
   { pattern: "*gpt-4o*",        caps: { vision: true, search: true, contextWindow: 128000, maxOutput: 16384 } },
@@ -275,8 +275,8 @@ export const PATTERN_CAPABILITIES = [
   { pattern: "*perplexity*",    caps: { search: true, contextWindow: 128000 } },
 
   // ── Others ───────────────────────────────────────────────────────
-  { pattern: "*laguna-s-2.1*",  caps: { reasoning: true, thinkingFormat: "openai", thinkingLevels: ["low", "medium", "high"], contextWindow: 128000 } },
-  { pattern: "*step-3.7*",      caps: { reasoning: true, thinkingFormat: "step", thinkingLevels: ["low", "medium", "high"], contextWindow: 256000 } },
+  { pattern: "*laguna-s-2.1*",  caps: { reasoning: true, thinkingFormat: "openai", thinkingLevels: ["low", "medium", "high"], contextWindow: 1048576, maxOutput: 131072 } },
+  { pattern: "*step-3.7*",      caps: { reasoning: true, thinkingFormat: "step", thinkingLevels: ["low", "medium", "high"], contextWindow: 256000, maxOutput: 256000 } },
   { pattern: "*hunyuan*",       caps: { reasoning: true, thinkingFormat: "hunyuan", contextWindow: 262144, maxOutput: 262144 } },
   { pattern: "hy3*",            caps: { reasoning: true, thinkingFormat: "hunyuan", contextWindow: 262144, maxOutput: 262144 } },
   { pattern: "*step-*",         caps: { reasoning: true, thinkingFormat: "step", contextWindow: 128000 } },

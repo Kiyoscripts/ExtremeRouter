@@ -32,3 +32,19 @@ describe("Claude Opus 1M context capabilities", () => {
     expect(getCapabilitiesForModel("cc", "claude-opus-4-5-20251101").contextWindow).toBe(200000);
   });
 });
+
+// Per-vendor window specs (vendor docs):
+//   kimi-k3           ctx 1,048,576 / out 1,048,576
+//   laguna-s-2.1      paid tier ctx 1,048,576 / out 131,072
+//   step-3.7-flash    ctx 256,000 / out 256,000
+describe("context/maxOutput windows for kimi-k3, laguna-s-2.1, step-3.7", () => {
+  it("kimi-k3 → 1M context + 1M output", () => {
+    expect(getCapabilitiesForModel("moonshot", "kimi-k3")).toMatchObject({ contextWindow: 1048576, maxOutput: 1048576 });
+  });
+  it("laguna-s-2.1 → 1M context + 131072 output (paid tier)", () => {
+    expect(getCapabilitiesForModel("cline", "poolside/laguna-s-2.1:free")).toMatchObject({ contextWindow: 1048576, maxOutput: 131072 });
+  });
+  it("step-3.7-flash → 256k context + 256k output", () => {
+    expect(getCapabilitiesForModel("stepfun", "step-3.7-flash")).toMatchObject({ contextWindow: 256000, maxOutput: 256000 });
+  });
+});
