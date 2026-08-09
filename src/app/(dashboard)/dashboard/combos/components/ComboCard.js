@@ -180,7 +180,9 @@ export default function ComboCard({ combo, modelCaps = {}, activeProviders = [],
   }));
   const hasEffort = modelThinking.some(m => {
     const fmt = m.caps.thinkingFormat;
-    return !!m.caps.reasoning && (fmt === "openai" || fmt === "effort" || !fmt);
+    // "deepseek" gains effort via OpenAI-style reasoning_effort after the V4
+    // tiers landed (low/high/max) — see thinkingUnified.js case "deepseek".
+    return !!m.caps.reasoning && (fmt === "openai" || fmt === "effort" || fmt === "deepseek" || !fmt);
   });
   const hasExtended = modelThinking.some(m => {
     const fmt = m.caps.thinkingFormat;
@@ -189,7 +191,7 @@ export default function ComboCard({ combo, modelCaps = {}, activeProviders = [],
   const hasMaxEffort = modelThinking.some(m => !!m.caps.thinkingMaxEffort);
   const unresolvableModels = modelThinking.filter(m => !m.caps.reasoning && m.caps.reasoning !== undefined);
   const unsupportedForCurrent = thinkingType === "effort"
-    ? modelThinking.filter(m => m.caps.reasoning === true && m.caps.thinkingFormat && m.caps.thinkingFormat !== "openai" && m.caps.thinkingFormat !== "effort")
+    ? modelThinking.filter(m => m.caps.reasoning === true && m.caps.thinkingFormat && m.caps.thinkingFormat !== "openai" && m.caps.thinkingFormat !== "effort" && m.caps.thinkingFormat !== "deepseek")
     : thinkingType === "extended"
       ? modelThinking.filter(m => m.caps.reasoning === true && m.caps.thinkingFormat && m.caps.thinkingFormat !== "claude-adaptive" && m.caps.thinkingFormat !== "claude" && m.caps.thinkingFormat !== "extended")
       : [];
