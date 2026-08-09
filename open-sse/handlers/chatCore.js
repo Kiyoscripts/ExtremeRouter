@@ -92,8 +92,22 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   const { cleanModel: cleanModelForUpstream } = parseSuffix(model);
   const upstreamModel = getModelUpstreamId(alias, cleanModelForUpstream);
 
-  if (providerThinking?.mode && providerThinking.mode !== "auto") {
-    const mode = providerThinking.mode;
+  // Thinking override. Two shapes funnel here:
+  //   • provider-level   { mode: "on"|"off"|"low"|"high"|… }  (settings page dropdown)
+  //   • combo-level      { type: "off"|"auto"|"effort"|"extended", effort?, budgetTokens? }
+  //                       (ComboCard thinking picker — see combo config screen)
+  const t = providerThinking;
+  if (t?.type) {
+    if (t.type === "off" && !body.thinking) {
+      body = { ...body, thinking: { type: "disabled" } };
+    } else if (t.type === "extended" && !body.thinking) {
+      const budget = Number(t.budgetTokens) || 10000;
+      body = { ...body, thinking: { type: "enabled", budget_tokens: budget } };
+    } else if (t.type === "effort" && !body.reasoning_effort) {
+      body = { ...body, reasoning_effort: t.effort || "high" };
+    }
+  } else if (t?.mode && t.mode !== "auto") {
+    const mode = t.mode;
     if (mode === "on" && !body.thinking) {
       console.log("Injecting provider-level thinking config override: on");
       body = { ...body, thinking: { type: "enabled", budget_tokens: 10000 } };
