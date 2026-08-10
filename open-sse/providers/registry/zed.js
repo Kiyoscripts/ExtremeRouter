@@ -2,18 +2,22 @@
 //
 // Zed Editor users import their cloud credentials (user_id + access_token),
 // which the gateway exchanges for a short-lived LLM bearer token (1h lifetime)
-// via POST /client/llm_tokens. The executor auto-refreshes when it expires.
+// via POST /client/llm_tokens. The executor (open-sse/executors/zed.js, ported
+// from 9router) auto-refreshes when it expires.
 //
 // Chat flow: POST /completions with a CompletionBody envelope:
 //   { thread_id, prompt_id, provider, model, provider_request }
-// where `provider` is one of "anthropic" | "google" | "open_ai" | "x_ai" and
-// `provider_request` is the native request body for that upstream. Zed streams
-// back JSONL lines of { Status: ... } / { Event: ... } wrapping the upstream
-// provider's delta events. The ZedExecutor translates these to OpenAI SSE.
+// where `provider` is one of "Anthropic" | "Google" | "OpenAi" | "XAi" and
+// `provider_request` is the NATIVE request body for that upstream — resolved
+// from the LIVE model catalog (GET /models) via shared/zedAuth.js, falling
+// back to name inference (claude*/gemini*/grok*/else → openai Responses).
+// Zed streams back JSONL lines of { Status: ... } / { Event: ... } wrapping
+// the upstream provider's delta events, translated to OpenAI SSE per-upstream
+// inside the executor.
 //
-// Model routing (resolveZedProvider in openai-to-zed.js):
-//   claude*/anthropic* → anthropic | gemini*/google* → google
-//   grok*/x-ai*        → x_ai       | everything else → open_ai (Responses API)
+// LAYOUT NOTE: the static catalog is intentionally empty — passthroughModels
+// forwards any client-sent model id, and model metadata comes from the live
+// catalog (modelsUrl) instead of a frozen list.
 
 export default {
   id: "zed",
@@ -32,36 +36,36 @@ export default {
     },
   },
   category: "oauth",
+  authType: "oauth",
+  hasOAuth: true,
   transport: {
     baseUrl: "https://cloud.zed.dev",
     chatPath: "/completions",
-    format: "zed",
+    format: "openai",
+    forceStream: true,
     headers: {
       "Content-Type": "application/json",
       "x-zed-client-supports-status-messages": "true",
+      "x-zed-client-supports-stream-ended-request-completion-status": "true",
       "x-zed-client-supports-x-ai": "true",
     },
+    auth: {
+      combined: true,
+      header: "Authorization",
+      scheme: "bearer",
+    },
+    usage: {
+      url: "https://cloud.zed.dev/client/users/me",
+    },
+    // Live catalog discovery — Zed's hosted model list changes frequently and
+    // is fetched per-connection rather than hardcoded.
+    modelsUrl: "https://cloud.zed.dev/models",
   },
-  // Catalog from GET /models (Bearer llm_token). Plan gating still applies at /completions.
-  models: [
-    { id: "claude-sonnet-5", name: "Claude Sonnet 5" },
-    { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" },
-    { id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5" },
-    { id: "claude-haiku-4-5", name: "Claude Haiku 4.5" },
-    { id: "gpt-5.6-sol", name: "GPT-5.6 Sol" },
-    { id: "gpt-5.6-terra", name: "GPT-5.6 Terra" },
-    { id: "gpt-5.6-luna", name: "GPT-5.6 Luna" },
-    { id: "gpt-5.5", name: "GPT-5.5" },
-    { id: "gpt-5.4", name: "GPT-5.4" },
-    { id: "gpt-5.3-codex", name: "GPT-5.3 Codex" },
-    { id: "gpt-5.2", name: "GPT-5.2" },
-    { id: "gpt-5.2-codex", name: "GPT-5.2 Codex" },
-    { id: "gpt-5-mini", name: "GPT-5 mini" },
-    { id: "gpt-5-nano", name: "GPT-5 nano" },
-    { id: "gemini-3.1-pro-preview", name: "Gemini 3.1 Pro" },
-    { id: "gemini-3.5-flash", name: "Gemini 3.5 Flash" },
-    { id: "gemini-3-flash", name: "Gemini 3 Flash" },
-  ],
+  // Empty static catalog + passthrough: Zed fronts a rotating set of upstream
+  // models (Claude/GPT/Gemini/Grok). Resolved live via modelsUrl; any
+  // client-sent model id is forwarded as-is rather than validated.
+  models: [],
+  passthroughModels: true,
   oauth: {
     apiEndpoint: "https://cloud.zed.dev",
     completionsPath: "/completions",

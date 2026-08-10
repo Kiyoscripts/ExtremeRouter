@@ -2229,12 +2229,14 @@ exports[`GOLDEN buildHeaders (default executor providers) > zed → headers (api
     "Authorization": "Bearer <TOK>",
     "Content-Type": "application/json",
     "x-zed-client-supports-status-messages": "true",
+    "x-zed-client-supports-stream-ended-request-completion-status": "true",
     "x-zed-client-supports-x-ai": "true",
   },
   "nonStream": {
     "Authorization": "Bearer <TOK>",
     "Content-Type": "application/json",
     "x-zed-client-supports-status-messages": "true",
+    "x-zed-client-supports-stream-ended-request-completion-status": "true",
     "x-zed-client-supports-x-ai": "true",
   },
   "oauth": {
@@ -2242,6 +2244,7 @@ exports[`GOLDEN buildHeaders (default executor providers) > zed → headers (api
     "Authorization": "Bearer <TOK>",
     "Content-Type": "application/json",
     "x-zed-client-supports-status-messages": "true",
+    "x-zed-client-supports-stream-ended-request-completion-status": "true",
     "x-zed-client-supports-x-ai": "true",
   },
 }
