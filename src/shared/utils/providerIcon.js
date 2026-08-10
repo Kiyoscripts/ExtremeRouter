@@ -28,6 +28,7 @@ export const SVG_ICON_IDS = new Set([
   "unimodel",
   "1min-api", "deepinfra", "codestral", "databricks", "venice", "vercel-ai-gateway", "marathon", "qwen2api",
   "kimi-desktop", "novita", "inferx",
+  "tokenharbor",
 ]);
 
 /**

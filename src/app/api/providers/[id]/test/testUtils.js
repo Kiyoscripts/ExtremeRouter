@@ -1224,6 +1224,13 @@ async function testApiKeyConnection(connection, effectiveProxy = null) {
         const valid = token.length >= 16;
         return { valid, error: valid ? null : "Token too short — re-copy the sk-ws-... token" };
       }
+      case "tokenharbor": {
+        const res = await fetchWithConnectionProxy("https://tokenharbor.ai/v1/models", {
+          headers: { "Authorization": `Bearer ${connection.apiKey}` },
+        }, effectiveProxy);
+        const valid = res.status !== 401 && res.status !== 403;
+        return { valid, error: valid ? null : "Invalid API key" };
+      }
       default:
         return { valid: false, error: "Provider test not supported" };
     }

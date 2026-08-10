@@ -296,6 +296,13 @@ export async function POST(request) {
           isValid = openrouterRes.ok;
           break;
 
+        case "tokenharbor":
+          const tokenharborRes = await fetch("https://tokenharbor.ai/v1/models", {
+            headers: { "Authorization": `Bearer ${apiKey}` },
+          });
+          isValid = tokenharborRes.status !== 401 && tokenharborRes.status !== 403;
+          break;
+
         case "glm":
         case "glm-cn":
         case "kimi":
