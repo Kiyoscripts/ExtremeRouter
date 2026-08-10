@@ -142,6 +142,16 @@ export const PROVIDER_CAPABILITIES = {
     "claude-opus-5":  { vision: true, reasoning: true, search: true, thinkingFormat: "claude-adaptive", contextWindow: 1000000, maxOutput: 128000 },
     "claude-fable-5": { vision: true, reasoning: true, search: true, thinkingFormat: "claude-adaptive", contextWindow: 1000000, maxOutput: 128000 },
   },
+  // meta-ai — Muse Spark family. Reasoning always on (native reasoning_effort
+  // tiers minimal/low/medium/high/xhigh; "none" unsupported → HTTP 400, so
+  // thinkingCanDisable false clamps disable requests to minimal). Provider-
+  // scoped so the generic *muse-spark* pattern can't leak native effort levels
+  // onto muse-spark-web (web bridge doesn't speak OpenAI-compatible effort).
+  "meta-ai": {
+    "muse-spark-1.2":            { reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, thinkingLevels: ["minimal", "low", "medium", "high", "xhigh"], contextWindow: 1048576, maxOutput: 131072 },
+    "muse-spark-1.2-contributor": { reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, thinkingLevels: ["minimal", "low", "medium", "high", "xhigh"], contextWindow: 1048576, maxOutput: 131072 },
+    "muse-spark-1.1":            { reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, thinkingLevels: ["minimal", "low", "medium", "high", "xhigh"], contextWindow: 1048576, maxOutput: 131072 },
+  },
   // codebuddy-intl + workbuddy — same CodeBuddy gateway on their own hosts
   // (codebuddy.ai / workbuddy.ai). WorkBuddy's flagship model is "hy3" (the
   // registry model id); it reasons via OpenAI-style reasoning_effort like every

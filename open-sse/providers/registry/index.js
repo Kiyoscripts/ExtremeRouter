@@ -160,6 +160,7 @@ import p158 from "./kimi-desktop.js";
 import p161 from "./tokenharbor.js";
 import p159 from "./workbuddy.js";
 import p160 from "./codebuddy-intl.js";
+import p162 from "./meta-ai.js";
 
 export default [
   p0,
@@ -320,7 +321,8 @@ export default [
   p156,
   p157,
   p158,
-  p161,
   p159,
   p160,
+  p161,
+  p162,
 ];

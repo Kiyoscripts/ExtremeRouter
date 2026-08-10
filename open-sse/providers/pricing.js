@@ -304,6 +304,16 @@ export const PROVIDER_PRICING = {
     "glm-5.2":         { input: 1.4, output: 4.4, cached: 0.26, reasoning: 4.4 },
     "gemini-3.6-flash": { input: 1.5, output: 7.5, cached: 0.15, reasoning: 7.5 },
   },
+  // Meta AI (meta-ai) — api.meta.ai Muse Spark family. Standard vs Contributor
+  // tier: 1.2/1.1 standard at $1.25·$4.25 per 1M, the "-contributor" variant at
+  // $0.10·$0.20 (data-sharing; ~60 req/min, ~250K tokens/day cap). Shared
+  // cached-input $0.15/1M. Reasoning price = output (codebase convention for
+  // reasoning models).
+  "meta-ai": {
+    "muse-spark-1.2":             { input: 1.25, output: 4.25, cached: 0.15, reasoning: 4.25 },
+    "muse-spark-1.2-contributor": { input: 0.10, output: 0.20, cached: 0.15, reasoning: 0.20 },
+    "muse-spark-1.1":             { input: 1.25, output: 4.25, cached: 0.15, reasoning: 4.25 },
+  },
 };
 
 /**
