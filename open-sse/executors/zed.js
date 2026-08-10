@@ -38,11 +38,15 @@ import {
   fetchZedLlmToken,
 } from "../shared/zedAuth.js";
 
+// Server-side LanguageModelProvider enum serializes WITH snake_case
+// (#[serde(rename_all = "snake_case")]) — "open_ai" not "OpenAi". Sending
+// PascalCase makes cloud.zed.dev fail to deserialize the envelope → 500
+// "An internal server error occurred".
 const ZED_PROVIDER = {
-  anthropic: "Anthropic",
-  openai: "OpenAi",
-  google: "Google",
-  xai: "XAi",
+  anthropic: "anthropic",
+  openai: "open_ai",
+  google: "google",
+  xai: "x_ai",
 };
 
 // Local client version sent as x-zed-version (9router uses its app version).
