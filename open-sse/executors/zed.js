@@ -298,6 +298,7 @@ class ZedExecutor extends BaseExecutor {
     const code = parsed?.code || errorObj?.code || "";
     const rawMessage =
       parsed?.message || errorObj?.message || bodyText || response.statusText;
+
     if (code === "trial_blocked") {
       return {
         status: response.status,
@@ -307,7 +308,17 @@ class ZedExecutor extends BaseExecutor {
     if (code) {
       return { status: response.status, message: `Zed ${code}: ${rawMessage}` };
     }
-    return { status: response.status, message: rawMessage || `Zed upstream error: ${response.status}` };
+    // Non-JSON upstream body (e.g. generic "An internal server error occurred")
+    // tells us nothing about which model/request shape failed. Keep the raw body
+    // so 500-class failures are debuggable instead of lossy.
+    if (parsed && (parsed.message || parsed.error)) {
+      return { status: response.status, message: rawMessage };
+    }
+    return {
+      status: response.status,
+      message: rawMessage || `Zed upstream error: ${response.status}`,
+      rawBody: bodyText || null,
+    };
   }
 
   // LOCAL ADAPTATION: proactive LLM token mint for the health/refresh pipeline

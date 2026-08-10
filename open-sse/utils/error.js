@@ -75,7 +75,10 @@ export async function parseUpstreamError(response, executor = null) {
       const parsed = executor.parseError(response, bodyText);
       if (parsed && typeof parsed === "object") {
         const msg = parsed.message || DEFAULT_ERROR_MESSAGES[response.status] || `Upstream error: ${response.status}`;
-        return { statusCode: parsed.status || response.status, message: msg, resetsAtMs: parsed.resetsAtMs };
+        // Non-JSON upstream bodies (e.g. zed 500 "An internal server error occurred")
+        // surfaced via rawBody so the failure stays debuggable instead of lossy.
+        const raw = parsed.rawBody ? ` (raw: ${parsed.rawBody})` : "";
+        return { statusCode: parsed.status || response.status, message: msg + raw, resetsAtMs: parsed.resetsAtMs };
       }
     } catch { /* fall through to default parsing */ }
   }

@@ -10,7 +10,17 @@ export class OpenCodeExecutor extends BaseExecutor {
     super("opencode", PROVIDERS.opencode);
   }
 
-  transformRequest(model, body) {
+  transformRequest(model, body, stream) {
+    // OpenCode is OpenAI-compatible and REJECTS `stream_options` without
+    // `stream: true` (400 "stream_options should be set along with stream = true").
+    // On non-streaming requests strip any client-sent stream_options so the pair
+    // can't go out mismatched (mirrors DefaultExecutor's stream/stream_options
+    // handling). The executor never injects stream_options on stream either —
+    // opencode accepts plain `stream: true`.
+    if (stream === false && body && typeof body === "object" && body.stream_options !== undefined) {
+      body = { ...body };
+      delete body.stream_options;
+    }
     return injectReasoningContent({ provider: this.provider, model, body });
   }
 
