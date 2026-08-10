@@ -1,3 +1,39 @@
+# v0.8.4 (2026-08-10)
+
+## Features
+- **Self-Hosted Media Nodes**: run your own STT / TTS / embedding nodes and register them in the gateway.
+- **New Provider: Meta AI**: Muse Spark models via api.meta.ai — dual openai+claude transports, contributor-tier pricing.
+- **New Provider: WorkBuddy + CodeBuddy International**: OAuth providers.
+- **New Provider: TokenHarbor**: API-key gateway provider.
+- **Zed Hosted AI Rework**: live model catalog (GET /models, cached 1h) replaces the static 17-model list; completion envelope sends per-upstream native request bodies (Claude / Gemini / OpenAI Responses / xAI); short-lived LLM token minted via /client/llm_tokens (50-min cache, auto-refresh on 401 / expiry headers); user token read from refreshToken to match the local credential layout.
+- **New Provider: Kimi Desktop**: OAuth auto-import from the desktop session, full desktop model list (k2.5 / k2.6 / k2 / thinking / search / k3), quota tracking + thinking levels, live quota via membership RPC.
+- **Thinking Tiers**: deepseek-v4 gains native low/high/max tiers (+ `thinkingMaxEffort`); laguna-s-2.1, step-3.7, and kimi-k3 gain thinking levels; combo requests apply the correct thinking shape per provider (OpenAI effort style for deepseek).
+- **Combo Budget**: per-combo max-cost budget with on/off toggle; budget wired through cascade, swarm, and TTS media combos.
+- **UI**: sidebar regroup (Homepage added, Media Providers moved under Gateway), Media Providers hub page, provider icons for kimi-desktop / novita / inferx.
+
+## Fixes
+- **Capability Corrections**: context / maxOutput for kimi-k3, laguna-s-2.1, step-3.7.
+- **Claude Settings**: tolerant JSONC read for POST / DELETE resets.
+- **Security**: bump dompurify / nanoid / vitest to patched versions.
+- **CI**: pack CLI tarball into repo root (not parent), pin postcss override for node:22-alpine npm 10, lowercase GHCR image name for buildx cache refs.
+
+# v0.8.3 (2026-08-07)
+
+## Features
+- **Cline**: stream-only API, x-client-type header, official model catalog.
+- **Model ACL**: per-key model allowlist enforced on all API handlers.
+- **Ollama Quota**: quota tracker + proactive background token refresh.
+- **Zed**: auto-import credentials from Windows Credential Manager; match upstream loadCodeAssist headers; refresh usage model list.
+- **TokenRouter**: accurate per-model pricing + thinking config.
+- **Combo Budget**: per-combo max-cost control with highlight badge; default cap raised to 100 USD.
+
+## Fixes
+- **antigravity**: break import cycle between registry and appConstants; match upstream loadCodeAssist headers.
+- **Circuit Breaker**: report real cooldown on rateLimited.
+- **Project ID**: negative cache stops re-onboarding on every request.
+- **Translator**: errorSent guard on terminal frames + dedupe sanitizer.
+- **Deps**: bump undici and ip-address to resolve high-severity audit findings.
+
 # v0.8.2 (2026-08-05)
 
 ## Features
