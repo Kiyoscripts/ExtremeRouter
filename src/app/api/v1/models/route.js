@@ -5,7 +5,7 @@ import {
   isAnthropicCompatibleProvider,
   isOpenAICompatibleProvider,
 } from "@/shared/constants/providers";
-import { getProviderConnections, getCombos, getCustomModels, getModelAliases } from "@/lib/localDb";
+import { getProviderConnections, getCombos, getCustomModels, getModelAliases, getSettings } from "@/lib/localDb";
 import { getDisabledModels } from "@/lib/disabledModelsDb";
 import { resolveKiroModels } from "open-sse/services/kiroModels.js";
 import { resolveKimchiModels } from "open-sse/services/kimchiModels.js";
@@ -15,6 +15,7 @@ import { resolveClinepassModels } from "open-sse/services/clinepassModels.js";
 import { getZenmuxModelsForPlan, getZenmuxPlanForCtoken } from "open-sse/services/zenmuxModels.js";
 import { updateProviderCredentials } from "@/sse/services/tokenRefresh";
 import { capabilitiesFromServiceKind } from "open-sse/providers/capabilities.js";
+import { normalizeComboStrategyConfig } from "open-sse/services/comboConfig.js";
 
 // Per-provider live model resolvers. Each receives a connection record and
 // returns { models: [{ id, name? }, ...] } | null on failure.
@@ -223,6 +224,21 @@ export async function buildModelsList(kindFilter) {
     console.log("Could not fetch combos");
   }
 
+  // Combo strategy overrides live in settings.comboStrategies[name] (the
+  // ComboCard editor writes there). The same merge buildComboExecutionGraph
+  // does at request time — effective thinking config is NOT combo.strategyConfig
+  // alone, so advertise the merged result so clients (e.g. zcode) see whether a
+  // combo model spins up thinking.
+  let comboStrategyOverrides = {};
+  try {
+    const settings = await getSettings();
+    comboStrategyOverrides = (settings?.comboStrategies && typeof settings.comboStrategies === "object")
+      ? settings.comboStrategies
+      : {};
+  } catch (e) {
+    console.log("Could not fetch combo strategy settings");
+  }
+
   let customModels = [];
   try {
     customModels = await getCustomModels();
@@ -294,6 +310,21 @@ export async function buildModelsList(kindFilter) {
     // null = unlimited / unset -> omit field entirely.
     if (Number.isInteger(combo.context_length) && combo.context_length > 0) {
       entry.context_length = combo.context_length;
+    }
+    // Advertise combo thinking via the same capabilities shape provider models
+    // use ({thinking, agentic}), so clients that gate on /v1/models
+    // capabilities (e.g. zcode) can detect combo thinking. Computed from the
+    // effective config (merged strategyConfig + settings.comboStrategies[name]
+    // override, same merge as request-time). Auto = no override, so it
+    // describes provider-level thinking (capabilities omitted, like models
+    // with no live caps).
+    const mergedStrategy = normalizeComboStrategyConfig({
+      ...(combo.strategyConfig || {}),
+      ...(comboStrategyOverrides[combo.name] || {}),
+    });
+    const comboThinking = mergedStrategy.thinking?.type;
+    if (comboThinking && comboThinking !== "auto") {
+      entry.capabilities = { thinking: true, agentic: false };
     }
     models.push(entry);
   }
