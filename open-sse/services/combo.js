@@ -629,6 +629,36 @@ export async function handleFusionChat({ body, models, handleSingleModel, log, c
   const judge = judgeModel && judgeModel.trim() ? judgeModel.trim() : panel[0];
   log.info("FUSION", `Combo "${comboName}" | panel=${panel.length} [${panel.join(", ")}] | judge=${judge} | quorum=${minPanel}`);
 
+  // Bounded-leg helper: the synthesis legs (survivor re-run, judge) get the
+  // same hard cap as the panel fan-out. Without it a hung model stalls the
+  // whole request until the client disconnects — the fan-out was capped but
+  // these final calls were unbounded. Uses createAbortableTask directly (like
+  // the panel fan-out) so the timeout ABORTS the underlying provider call and
+  // cleanup() releases the run-level abort listener. Timeout → 504;
+  // client-disconnect aborts rethrow so the caller's contract
+  // (dispatchComboByName catch) is preserved unchanged.
+  const runTimedLeg = async (taskFactory, label) => {
+    const task = createAbortableTask(taskFactory, cfg.panelHardTimeoutMs, signal);
+    const result = await task.promise;
+    task.cleanup();
+    if (result?.__error?.name === "AbortError") throw result.__error;
+    if (result?.__timeout) {
+      log.warn("FUSION", `${label} timed out after ${cfg.panelHardTimeoutMs}ms`);
+      return new Response(
+        JSON.stringify({ error: { message: `${label} timed out` } }),
+        { status: 504, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    if (result?.__error) {
+      log.warn("FUSION", `${label} error: ${result.__error?.message || result.__error}`);
+      return new Response(
+        JSON.stringify({ error: { message: `${label} failed: ${result.__error?.message || "unknown error"}` } }),
+        { status: 502, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    return result;
+  };
+
   // 1. Fan out to the panel in parallel: non-streaming, tools stripped.
   const format = inferConversationFormat(body);
   const panelBody = buildCoordinatorBody(body, format);
@@ -693,7 +723,10 @@ export async function handleFusionChat({ body, models, handleSingleModel, log, c
     const wantsStream = body?.stream === true;
     if (wantsStream) {
       log.info("FUSION", `Only ${answers[0].model} succeeded — re-running with stream:true to honor client SSE request (no fusion)`);
-      return handleSingleModel(body, answers[0].model, { role: "panel", signal, trafficClass: "user" });
+      return runTimedLeg(
+        (childSignal) => handleSingleModel(body, answers[0].model, { role: "panel", signal: childSignal, trafficClass: "user" }),
+        `Re-run ${answers[0].model}`,
+      );
     }
     log.info("FUSION", `Only ${answers[0].model} succeeded — returning its response directly (no fusion, no re-run)`);
     return answers[0].res;
@@ -703,7 +736,10 @@ export async function handleFusionChat({ body, models, handleSingleModel, log, c
   const maxJudgeChars = runBudget?.limits?.maxOutputChars || 120000;
   const judgeBody = appendDirective(body, clampText(buildJudgePrompt(answers), maxJudgeChars), format);
   log.info("FUSION", `Judging ${answers.length} answers with ${judge}`);
-  return handleSingleModel(judgeBody, judge, { role: "judge", signal, trafficClass: "user" });
+  return runTimedLeg(
+    (childSignal) => handleSingleModel(judgeBody, judge, { role: "judge", signal: childSignal, trafficClass: "user" }),
+    `Judge ${judge}`,
+  );
 }
 
 // ── Cascade ────────────────────────────────────────────────────────────

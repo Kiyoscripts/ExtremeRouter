@@ -213,4 +213,96 @@ describe("fusion combo", () => {
     // Flattened tool_result
     expect(panelBody.messages[2].content).toBe("[Tool result: done]");
   });
+
+  it("returns 504 when the hung judge leg hits the same hard cap as the panel", async () => {
+    const handleSingleModel = vi.fn((_body, model, opts = {}) => {
+      if (opts?.isPanel) return okResponse(`ans-${model}`);
+      return new Promise(() => {}); // judge never settles → hard cap must fire
+    });
+
+    const t0 = Date.now();
+    const res = await handleFusionChat({
+      body: { messages: [{ role: "user", content: "Q" }] },
+      models: ["anthropic/a", "anthropic/b"],
+      handleSingleModel,
+      log,
+      judgeModel: "anthropic/judge",
+      tuning: { minPanel: 2, stragglerGraceMs: 10, panelHardTimeoutMs: 50 },
+    });
+
+    expect(res.status).toBe(504);
+    expect(Date.now() - t0).toBeLessThan(2000); // did not stall on the hung judge
+    // The judge leg was actually reached (2 panel + 1 judge call).
+    expect(handleSingleModel.mock.calls.length).toBe(3);
+  });
+
+  it("re-runs the lone survivor with the original stream:true body (wrapped in the leg cap)", async () => {
+    const handleSingleModel = vi.fn(async (_body, model, opts = {}) => {
+      if (model === "anthropic/ok" && !opts?.isPanel) return okResponse("re-run-stream");
+      if (model === "anthropic/ok") return okResponse("lone");
+      return errResponse(500);
+    });
+
+    const res = await handleFusionChat({
+      body: { messages: [{ role: "user", content: "Q" }], stream: true },
+      models: ["anthropic/ok", "anthropic/bad"],
+      handleSingleModel,
+      log,
+      judgeModel: "anthropic/judge",
+      tuning: { minPanel: 2, stragglerGraceMs: 10, panelHardTimeoutMs: 5000 },
+    });
+
+    // No judge call — single answer. Survivor re-run preserves the stream flag.
+    expect(handleSingleModel.mock.calls.some(([, m]) => m === "anthropic/judge")).toBe(false);
+    const rerun = handleSingleModel.mock.calls.find(([, m, o]) => m === "anthropic/ok" && !o?.isPanel);
+    expect(rerun).toBeDefined();
+    expect(rerun[0].stream).toBe(true);
+    expect(res.ok).toBe(true);
+  });
+
+  it("returns 502 when the judge leg throws", async () => {
+    const handleSingleModel = vi.fn((_body, model, opts = {}) => {
+      if (opts?.isPanel) return okResponse(`ans-${model}`);
+      return Promise.reject(new Error("judge exploded"));
+    });
+
+    const res = await handleFusionChat({
+      body: { messages: [{ role: "user", content: "Q" }] },
+      models: ["anthropic/a", "anthropic/b"],
+      handleSingleModel,
+      log,
+      judgeModel: "anthropic/judge",
+      tuning: { minPanel: 2, stragglerGraceMs: 10, panelHardTimeoutMs: 5000 },
+    });
+
+    expect(res.status).toBe(502);
+    const json = await res.clone().json();
+    expect(json.error.message).toContain("judge exploded");
+  });
+
+  it("rethrows AbortError on client disconnect instead of swallowing it", async () => {
+    const makeJudge = (_body, _model, opts = {}) => new Promise((_resolve, reject) => {
+      opts?.signal?.addEventListener("abort", () => {
+        reject(Object.assign(new Error("client disconnected"), { name: "AbortError" }));
+      }, { once: true });
+    });
+    const handleSingleModel = vi.fn((body, model, opts = {}) => {
+      if (opts?.isPanel) return okResponse(`ans-${model}`);
+      return makeJudge(body, model, opts);
+    });
+
+    const ctrl = new AbortController();
+    const call = handleFusionChat({
+      body: { messages: [{ role: "user", content: "Q" }] },
+      models: ["anthropic/a", "anthropic/b"],
+      handleSingleModel,
+      log,
+      judgeModel: "anthropic/judge",
+      tuning: { minPanel: 2, stragglerGraceMs: 10, panelHardTimeoutMs: 5000 },
+      signal: ctrl.signal,
+    });
+
+    setTimeout(() => ctrl.abort(new Error("client disconnected")), 20);
+    await expect(call).rejects.toMatchObject({ name: "AbortError" });
+  });
 });

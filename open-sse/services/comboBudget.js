@@ -36,7 +36,11 @@ export function createComboBudget({ body, config, leaves = [], logicalCalls = 1 
     clampOutput(text) {
       const remaining = Math.max(0, Math.min(limits.maxOutputChars, limits.maxAggregateOutputChars - aggregateOutputChars));
       const value = String(text || "");
-      const out = value.slice(0, remaining || limits.maxOutputChars);
+      // slice to `remaining` directly; `remaining || maxOutputChars` would
+      // bypass the aggregate cap when remaining is 0 (0 || fallback = fallback),
+      // letting later outputs exceed maxAggregateOutputChars. At 0 the output
+      // is dropped — callers (fusion/swarm) treat "" as over-budget.
+      const out = value.slice(0, remaining);
       aggregateOutputChars += out.length;
       return out;
     },
