@@ -24,11 +24,19 @@ const L = {
   EFFORT: ["minimal", "low", "medium", "high"],
   // Models that explicitly support "max" (kimi-k3, gpt-5.6-sol on Kiro).
   EFFORT_MAX: ["minimal", "low", "medium", "high", "max"],
+  // Codex GPT-5.6 (port of decolua/9router GPT-5.6 reasoning-overrides design):
+  // Sol/Terra advertise the full range plus `ultra`; Luna tops out at `max`.
+  CODEX_GPT_5_6: ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
 };
 
 // Pattern → levels mapping. Order matters: first match wins (specific →
-// generic). Patterns use the same glob syntax as capabilities.js.
+// generic). Patterns use the same glob syntax as capabilities.js. Entries with
+// a `provider` constraint only match that provider (codex vs kiro share the
+// gpt-5.6 names — the override matrix is codex-only, Kiro keeps its set).
 const PATTERN_THINKING = [
+  { provider: "codex", pattern: "*gpt-5.6-sol*", levels: [...L.CODEX_GPT_5_6, "ultra"] },
+  { provider: "codex", pattern: "*gpt-5.6-terra*", levels: [...L.CODEX_GPT_5_6, "ultra"] },
+  { provider: "codex", pattern: "*gpt-5.6-luna*", levels: L.CODEX_GPT_5_6 },
   // Kiro GPT-5.6 family supports xhigh + max.
   { pattern: "gpt-5.6-*", levels: L.KIRO_NATIVE },
   // Kiro Claude 5 family.
@@ -59,8 +67,8 @@ export function getThinkingLevels(provider, model) {
   const caps = getCapabilitiesForModel(provider, model);
   if (!caps.reasoning) return null;
 
-  // Pattern match for Kiro native families.
-  const hit = PATTERN_THINKING.find((p) => matchPattern(p.pattern, model));
+  // Pattern match for Kiro native families / provider-scoped overrides (codex).
+  const hit = PATTERN_THINKING.find((p) => (!p.provider || p.provider === provider) && matchPattern(p.pattern, model));
   if (hit) return hit.levels;
 
   // Explicit per-model level list (caps.thinkingLevels) wins — e.g. kimi-k3

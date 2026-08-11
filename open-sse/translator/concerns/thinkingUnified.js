@@ -3,6 +3,7 @@
 // never hardcoded per-model here. See .docs/thinking/plan.md MATRIX VI-A.
 
 import { getCapabilitiesForModel } from "../../providers/capabilities.js";
+import { getThinkingLevels } from "../../providers/thinkingLevels.js";
 import { PROVIDERS } from "../../providers/index.js";
 import { LEVEL_TO_BUDGET, budgetToLevel, effortToBudget, effortToThinkingLevel } from "./thinking.js";
 
@@ -30,6 +31,7 @@ export function parseSuffix(model) {
   const raw = m[2].trim().toLowerCase();
   if (raw === "none" || raw === "off") return { cleanModel, override: { mode: "none" } };
   if (raw === "auto") return { cleanModel, override: { mode: "auto" } };
+  if (raw === "ultra") return { cleanModel, override: { mode: "level", level: raw } };
   if (/^\d+$/.test(raw)) return { cleanModel, override: { mode: "budget", budget: Number(raw) } };
   if (LEVEL_TO_BUDGET[raw] !== undefined) return { cleanModel, override: { mode: "level", level: raw } };
   return { cleanModel, override: null };
@@ -121,7 +123,9 @@ function toBudget(cfg, range) {
 
 // M8 FIX: Valid effort levels — any client-sent value outside this set is
 // rejected (returns null) so it can't leak to upstream as an invalid enum.
-const VALID_LEVELS = new Set(["minimal", "low", "medium", "high", "xhigh", "max"]);
+// `ultra` (Codex GPT-5.6 Sol/Terra) joins the set; per-model support is
+// enforced downstream via normalizeOpenAILevel.
+const VALID_LEVELS = new Set(["minimal", "low", "medium", "high", "xhigh", "max", "ultra"]);
 
 // Convert unified config to a discrete level string.
 function toLevel(cfg) {
@@ -132,6 +136,16 @@ function toLevel(cfg) {
   if (cfg.mode === "budget") return budgetToLevel(cfg.budget) || "medium";
   if (cfg.mode === "auto") return "auto";
   return null;
+}
+
+// Codex GPT-5.6 overrides (port of decolua/9router design): preserve max/ultra
+// only when the target model's advertised levels include it; ultra→max when
+// only max is supported (Luna); anything else max/ultra → xhigh (safe ceiling).
+function normalizeOpenAILevel(level, supportedLevels) {
+  if (level !== "max" && level !== "ultra") return level;
+  if (supportedLevels?.includes(level)) return level;
+  if (level === "ultra" && supportedLevels?.includes("max")) return "max";
+  return "xhigh";
 }
 
 function toGeminiThinkingLevel(cfg) {
@@ -177,7 +191,7 @@ function stripAll(body) {
 }
 
 // Apply unified thinking config to body in the resolved provider-native format.
-function applyFormat(fmt, body, cfg, caps, model) {
+function applyFormat(fmt, body, cfg, caps, model, provider) {
   const none = cfg.mode === "none";
   const canDisable = caps.thinkingCanDisable !== false;
   // Model cannot disable thinking → clamp "none" to minimal effort instead.
@@ -187,14 +201,16 @@ function applyFormat(fmt, body, cfg, caps, model) {
     case "openai": {
       if (none && canDisable) { body.reasoning_effort = "none"; break; }
       const level = toLevel(eff);
-      if (level && level !== "auto") body.reasoning_effort = clampToLevels(level, caps.thinkingLevels);
-      else delete body.reasoning_effort;
+      if (level && level !== "auto") {
+        const clamped = clampToLevels(level, caps.thinkingLevels);
+        body.reasoning_effort = normalizeOpenAILevel(clamped, getThinkingLevels(provider, model));
+      } else delete body.reasoning_effort;
       break;
     }
     case "claude-adaptive": {
       if (none && canDisable) { body.thinking = { type: "disabled" }; break; }
       const level = toLevel(eff);
-      body.output_config = { effort: level === "xhigh" ? "high" : level };
+      body.output_config = { effort: level === "xhigh" || level === "ultra" ? "high" : level };
       break;
     }
     case "claude-budget": {
@@ -236,7 +252,7 @@ function applyFormat(fmt, body, cfg, caps, model) {
       const level = toLevel(eff);
       const isV4 = /(^|\/)deepseek-v4/i.test(model);
       body.reasoning_effort =
-        level === "xhigh" || level === "max" ? "max" :
+        level === "xhigh" || level === "max" || level === "ultra" ? "max" :
         level === "high" || level === "medium" ? "high" :
         level === "low" ? "low" :
         level === "minimal" ? (isV4 ? "low" : "high") : "high";
@@ -250,7 +266,7 @@ function applyFormat(fmt, body, cfg, caps, model) {
       if (level && level !== "auto") {
         body.reasoning_effort =
           level === "minimal" ? "low" :
-          level === "xhigh" || level === "max" ? "high" : level;
+          level === "xhigh" || level === "max" || level === "ultra" ? "high" : level;
       }
       break;
     }
@@ -273,7 +289,7 @@ function applyFormat(fmt, body, cfg, caps, model) {
       if (level && level !== "auto") {
         body.reasoning_effort =
           level === "minimal" ? "low" :
-          level === "xhigh" || level === "max" ? "high" : level;
+          level === "xhigh" || level === "max" || level === "ultra" ? "high" : level;
       }
       break;
     }
@@ -305,6 +321,6 @@ export function applyThinking(targetFormat, model, body, provider = null, intent
 
   const fmt = resolveFormat(targetFormat, cleanModel, provider);
   stripAll(body);
-  applyFormat(fmt, body, cfg, caps, cleanModel);
+  applyFormat(fmt, body, cfg, caps, cleanModel, provider);
   return body;
 }

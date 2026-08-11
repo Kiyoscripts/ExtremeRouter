@@ -19,6 +19,7 @@ import {
   getQoderUsage,
 } from "./usage/misc.js";
 import { getOllamaUsage } from "./usage/ollama.js";
+import { resolveQoderCredentials } from "./qoderModels.js";
 import { getXaiUsage } from "./usage/xai.js";
 import { getTokenRouterUsage } from "./usage/tokenrouter.js";
 import { getClineUsage } from "./usage/cline.js";
@@ -40,7 +41,11 @@ const USAGE_HANDLERS = {
   claude: (c) => getClaudeUsage(c.accessToken, c.proxyOptions),
   codex: (c) => getCodexUsage(c.accessToken, c.proxyOptions),
   kiro: (c) => getKiroUsage(c.accessToken, c.providerSpecificData, c.proxyOptions),
-  qoder: (c) => getQoderUsage(c.accessToken, c.proxyOptions),
+  qoder: async (c) => {
+    // PAT connections need the job-token exchange before quota can be read.
+    const resolved = await resolveQoderCredentials(c, c.proxyOptions).catch(() => null);
+    return getQoderUsage(resolved?.accessToken || c.accessToken, c.proxyOptions);
+  },
   qwen: (c) => getQwenUsage(c.accessToken, c.providerSpecificData),
   iflow: (c) => getIflowUsage(c.accessToken),
   ollama: (c) => getOllamaUsage(c.apiKey, c.proxyOptions),

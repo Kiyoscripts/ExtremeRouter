@@ -5,6 +5,7 @@ import { isOpenAICompatibleProvider, isAnthropicCompatibleProvider, isCustomEmbe
 import { getDefaultModel } from "open-sse/config/providerModels.js";
 import { resolveOllamaLocalHost, resolveXiaomiTokenplanBaseUrl, PROVIDERS } from "open-sse/config/providers.js";
 import { openaiToCommandCodeRequest } from "open-sse/translator/request/openai-to-commandcode.js";
+import { resolveQoderCredentials } from "open-sse/services/qoderModels.js";
 import { normalizeProviderId } from "@/lib/providerNormalization";
 
 // Probe a webSearch/webFetch provider using its searchConfig/fetchConfig.
@@ -302,6 +303,22 @@ export async function POST(request) {
           });
           isValid = tokenharborRes.status !== 401 && tokenharborRes.status !== 403;
           break;
+
+        case "qoder": {
+          // PAT connections validate through the job-token exchange (the
+          // endpoint doubles as a credential check). Non-PAT keys fail clean.
+          try {
+            const credentials = await resolveQoderCredentials(
+              { apiKey, providerSpecificData: {} },
+              null,
+              AbortSignal.timeout(8000),
+            );
+            isValid = !!credentials?.accessToken;
+          } catch {
+            isValid = false;
+          }
+          break;
+        }
 
         case "glm":
         case "glm-cn":

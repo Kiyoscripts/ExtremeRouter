@@ -11,6 +11,7 @@ import { getModelUpstreamId } from "../config/providerModels.js";
 import { DEFAULT_RETRY_CONFIG, resolveRetryEntry } from "../config/runtimeConfig.js";
 import { dbg } from "../utils/debugLog.js";
 import { resolveSessionId } from "../utils/sessionManager.js";
+import { getThinkingLevels } from "../providers/thinkingLevels.js";
 
 // SSE error patterns inside 200-OK body that should trigger retry as if 503
 const CODEX_SSE_OVERLOADED_PATTERNS = ["server_is_overloaded", "service_unavailable_error", "capacity", "rate_limit_exceeded", "insufficient_quota"];
@@ -114,6 +115,18 @@ function resolveCacheSessionId(body, credentials) {
     workspaceId: credentials?.providerSpecificData?.workspaceId,
     scope: "codex"
   });
+}
+
+// Codex reasoning-level gate (port of decolua/9router GPT-5.6 overrides design):
+// preserve max/ultra only when the model's advertised levels include it (GPT-5.6
+// Sol/Terra → max+ultra, Luna → max, older codex models → xhigh ceiling).
+// Unsupported max/ultra collapses to xhigh — the safe codex ceiling.
+function normalizeReasoningEffort(model, value) {
+  const supportedLevels = getThinkingLevels("codex", model);
+  if (supportedLevels?.includes(value)) return value;
+  if (value === "ultra" && supportedLevels?.includes("max")) return "max";
+  if (value === "max" || value === "ultra") return "xhigh";
+  return value;
 }
 
 /**
@@ -360,10 +373,11 @@ export class CodexExecutor extends BaseExecutor {
 
     // Priority: explicit reasoning.effort > reasoning_effort param > model suffix > default (medium)
     if (!body.reasoning) {
-      const effort = body.reasoning_effort || modelEffort || 'low';
+      const effort = normalizeReasoningEffort(body.model, body.reasoning_effort || modelEffort || 'low');
       body.reasoning = { effort, summary: "auto" };
-    } else if (!body.reasoning.summary) {
-      body.reasoning.summary = "auto";
+    } else {
+      body.reasoning.effort = normalizeReasoningEffort(body.model, body.reasoning.effort);
+      if (!body.reasoning.summary) body.reasoning.summary = "auto";
     }
     delete body.reasoning_effort;
 

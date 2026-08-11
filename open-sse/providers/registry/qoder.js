@@ -11,10 +11,11 @@ export default {
     notice: {
       signupUrl: "https://qoder.com",
     },
-    deprecated: true,
-    deprecationNotice: "RISK_NOTICE",
   },
-  category: "free",
+  category: "oauth",
+  authModes: ["oauth", "apikey"],
+  hasOAuth: true,
+  authHint: "Personal Access Token (pt-...) from https://qoder.com/account/integrations",
   transport: {
     baseUrl: "https://api3.qoder.sh/algo/api/v2/service/pro/sse/agent_chat_generation",
     headers: {},
@@ -50,5 +51,6 @@ export default {
   },
   features: {
     usage: true,
+    usageApikey: true,
   },
 };

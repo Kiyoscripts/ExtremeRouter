@@ -100,10 +100,27 @@ export const MODEL_CAPABILITIES = {
   "coder-model":       { reasoning: true, thinkingFormat: "qwen", contextWindow: 1000000 },
 };
 
+// Codex OAuth (ChatGPT backend) — per-model context window reported by upstream
+// (lower than OpenAI API's 1.05M). Sol differs from Terra/Luna. Port of
+// decolua/9router GPT-5.6 Codex reasoning-overrides design.
+const CODEX_GPT_56_SOL_CAPS  = { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 372000, maxOutput: 128000 };
+const CODEX_GPT_56_DEFAULT_CAPS = { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 272000, maxOutput: 128000 };
+
 /**
  * Provider-specific capability overrides. Keyed by provider alias/id.
  */
 export const PROVIDER_CAPABILITIES = {
+  // Codex GPT-5.6 family — provider-scoped so the global *gpt-5.6* patterns
+  // (which describe Kiro) can't leak onto cx/ models, and the *gpt-5*codex*
+  // 400k default can't override Sol's real 372k window.
+  codex: {
+    "gpt-5.6-sol":         CODEX_GPT_56_SOL_CAPS,
+    "gpt-5.6-sol-review":  CODEX_GPT_56_SOL_CAPS,
+    "gpt-5.6-terra":       CODEX_GPT_56_DEFAULT_CAPS,
+    "gpt-5.6-terra-review": CODEX_GPT_56_DEFAULT_CAPS,
+    "gpt-5.6-luna":        CODEX_GPT_56_DEFAULT_CAPS,
+    "gpt-5.6-luna-review": CODEX_GPT_56_DEFAULT_CAPS,
+  },
   // NVIDIA NIM is OpenAI-compatible → rejects MiniMax/GLM native `thinking` field.
   // Force openai reasoning_effort format for its reasoning models. #issue
   "nvidia": {

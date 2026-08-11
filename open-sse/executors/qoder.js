@@ -32,9 +32,11 @@ import { SSE_DONE } from "../utils/sseConstants.js";
 import { FETCH_CONNECT_TIMEOUT_MS } from "../config/runtimeConfig.js";
 import {
   QODER_CHAT_URL_ENCODED,
+  QODER_CHAT_BASE_ALT,
+  QODER_CHAT_SIG_PATH,
   QODER_MODEL_MAP,
 } from "../shared/qoder/constants.js";
-import { getQoderModelConfig, resolveQoderModels } from "../services/qoderModels.js";
+import { getQoderModelConfig, resolveQoderModels, isQoderPat, resolveQoderCredentials } from "../services/qoderModels.js";
 
 /**
  * Hoist role:"system" messages out of the messages array (Qoder rejects
@@ -326,7 +328,12 @@ export class QoderExecutor extends BaseExecutor {
     super("qoder", PROVIDERS.qoder);
   }
 
-  buildUrl() {
+  buildUrl(credentials) {
+    const raw = credentials?.apiKey || credentials?.accessToken;
+    if (typeof raw === "string" && raw.startsWith("jt-")) {
+      // Job tokens (PAT exchange) sign against the alt inference host.
+      return `${QODER_CHAT_BASE_ALT}/algo${QODER_CHAT_SIG_PATH}?FetchKeys=llm_model_result&AgentId=agent_common&Encode=1`;
+    }
     return QODER_CHAT_URL_ENCODED;
   }
 
@@ -336,7 +343,23 @@ export class QoderExecutor extends BaseExecutor {
   //   - COSY headers built from the *encoded* body bytes
   //   - response stream re-wrapped from {statusCodeValue, body} to OpenAI SSE
   async execute({ model, body, stream, credentials, signal, log, proxyOptions = null }) {
-    const url = this.buildUrl();
+    // PAT connections (pt-...): exchange for a short-lived job token (jt-...)
+    // — PATs cannot sign COSY directly. Failure → clean 401, no cosy throw.
+    const rawToken = credentials?.apiKey || credentials?.accessToken;
+    if (isQoderPat(rawToken)) {
+      try {
+        credentials = await resolveQoderCredentials(credentials, proxyOptions, signal);
+      } catch (err) {
+        log?.error?.("QODER", `PAT exchange failed: ${err.message}`);
+        const fakeResp = new Response(
+          JSON.stringify({ error: { message: `qoder PAT exchange failed: ${err.message}` } }),
+          { status: 401, headers: { "Content-Type": "application/json" } },
+        );
+        return { response: fakeResp, url: this.buildUrl(credentials), headers: {}, transformedBody: body };
+      }
+    }
+
+    const url = this.buildUrl(credentials);
 
     const psd = credentials?.providerSpecificData || {};
     if (!psd.userId) {
