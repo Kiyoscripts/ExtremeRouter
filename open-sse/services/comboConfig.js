@@ -96,6 +96,7 @@ export function normalizeComboStrategyConfig(raw = {}) {
   const fusionSource = source.fusionTuning && typeof source.fusionTuning === "object" ? source.fusionTuning : {};
   const budgetsSource = source.budgets && typeof source.budgets === "object" ? source.budgets : {};
   const cascadeSource = source.cascade && typeof source.cascade === "object" ? source.cascade : {};
+  const adapterSource = source.capabilityAdapter && typeof source.capabilityAdapter === "object" ? source.capabilityAdapter : {};
 
   return {
     fallbackStrategy,
@@ -107,6 +108,13 @@ export function normalizeComboStrategyConfig(raw = {}) {
     enableTelemetry: source.enableTelemetry !== false,
     thinking: normalizeThinking(source.thinking),
     cascade: normalizeCascadeConfig(cascadeSource),
+    capabilityAdapter: {
+      // Tri-state: null = inherit the global setting (comboCapabilityAdapterEnabled),
+      // so per-combo config can opt out (`false`) or force on (`true`) without
+      // losing the default-on behavior for unset combos.
+      enabled: typeof adapterSource.enabled === "boolean" ? adapterSource.enabled : null,
+      fallbackModel: typeof adapterSource.fallbackModel === "string" ? adapterSource.fallbackModel.trim() : "",
+    },
     fusionTuning: {
       minPanel: asInt(fusionSource.minPanel, 2, 2, COMBO_LIMITS.maxMembers),
       stragglerGraceMs: asInt(fusionSource.stragglerGraceMs, 8000, 0, COMBO_LIMITS.maxGraceMs),

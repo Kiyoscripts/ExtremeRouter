@@ -122,6 +122,14 @@ export function flattenToolHistory(messages) {
     });
 }
 
+// Resolve capability object for a "provider/model" string (alias prefix resolved).
+function modelCapabilitiesFor(modelStr) {
+  const slash = typeof modelStr === "string" ? modelStr.indexOf("/") : -1;
+  const provider = slash > 0 ? resolveProviderAlias(modelStr.slice(0, slash)) : "";
+  const model = slash > 0 ? modelStr.slice(slash + 1) : modelStr;
+  return getCapabilitiesForModel(provider, model);
+}
+
 // Reorder combo models by capability fit. Stable; never drops a model (fallback intact).
 // Tier 0: satisfies all hard + all soft. Tier 1: all hard only. Tier 2: rest.
 export function reorderByCapabilities(models, required) {
@@ -130,10 +138,7 @@ export function reorderByCapabilities(models, required) {
   const soft = [...required].filter((c) => !HARD_CAPS.has(c));
 
   const tierOf = (m) => {
-    const slash = typeof m === "string" ? m.indexOf("/") : -1;
-    const provider = slash > 0 ? resolveProviderAlias(m.slice(0, slash)) : "";
-    const model = slash > 0 ? m.slice(slash + 1) : m;
-    const caps = getCapabilitiesForModel(provider, model);
+    const caps = modelCapabilitiesFor(m);
     if (!hard.every((c) => caps[c] === true)) return 2;
     return soft.every((c) => caps[c] === true) ? 0 : 1;
   };
@@ -143,6 +148,37 @@ export function reorderByCapabilities(models, required) {
     .map((m, i) => ({ m, i, t: tierOf(m) }))
     .sort((a, b) => a.t - b.t || a.i - b.i)
     .map((x) => x.m);
+}
+
+// Default fallback prepended when no combo member covers the request's hard
+// input modalities. `oc/mimo-v2.5-free` is vision-capable per MODEL_CAPABILITIES
+// pattern `*mimo*v2.5*`; audio/video are NOT asserted there, so the adapter
+// guard below deliberately refuses to route audio/video to it until upstream
+// metadata proves otherwise — routing to a not-proven-capable model would just
+// produce broken requests.
+export const DEFAULT_CAPABILITY_FALLBACK_MODEL = "oc/mimo-v2.5-free";
+
+/**
+ * Capability adapter. If the request needs hard input modalities (vision/pdf/
+ * audio/video) and NO combo member covers all of them, prepend the configured
+ * fallback model — but only when the fallback is KNOWN to cover them (unknown
+ * capability ≠ capable). Pure: returns a new array or the SAME array reference
+ * when nothing changes, so callers can detect insertion via identity.
+ */
+export function applyCapabilityAdapter(members, required, fallbackModel = "") {
+  if (!Array.isArray(members) || members.length === 0) return members;
+  const hard = [...(required || [])].filter((c) => HARD_CAPS.has(c));
+  if (hard.length === 0) return members;
+  const satisfies = (m) => {
+    const caps = modelCapabilitiesFor(m);
+    return hard.every((c) => caps[c] === true);
+  };
+  // 1. A member already covers every required modality → nothing to do.
+  if (members.some(satisfies)) return members;
+  // 2. Fallback must be known-capable and not already in the list.
+  if (!fallbackModel || members.includes(fallbackModel) || !satisfies(fallbackModel)) return members;
+  // 3. Prepend so the fallback is attempted first; original order preserved after.
+  return [fallbackModel, ...members];
 }
 
 /**
@@ -163,9 +199,9 @@ function trailingUserItems(arr) {
   return arr.slice(i + 1);
 }
 
-// Detect which capabilities a request needs. Modalities (vision/pdf) are scanned
-// only on the current user turn; "search" is request-wide (lives in tools).
-// Returns a Set of: "vision" | "pdf" | "search".
+// Detect which capabilities a request needs. Modalities (vision/pdf/audio/video)
+// are scanned only on the current user turn; "search" is request-wide (lives in
+// tools). Returns a Set of hard-caps: "vision" | "pdf" | "audioInput" | "videoInput".
 export function detectRequiredCapabilities(body) {
   const required = new Set();
   if (!body || typeof body !== "object") return required;
@@ -174,10 +210,14 @@ export function detectRequiredCapabilities(body) {
     if (!b || typeof b !== "object") return;
     const t = b.type;
     if (t === "image_url" || t === "image" || t === "input_image") required.add("vision");
+    if (t === "audio_url" || t === "audio" || t === "input_audio") required.add("audioInput");
+    if (t === "video_url" || t === "video" || t === "input_video") required.add("videoInput");
     if (t === "file" || t === "document" || t === "input_file") required.add("pdf");
     // gemini parts: inlineData/fileData carry a mime
     const mime = b.inlineData?.mimeType || b.fileData?.mimeType;
     if (typeof mime === "string" && mime.startsWith("image/")) required.add("vision");
+    if (typeof mime === "string" && (mime.startsWith("audio/") || mime === "application/ogg")) required.add("audioInput");
+    if (typeof mime === "string" && (mime.startsWith("video/") || mime === "application/mp4")) required.add("videoInput");
     if (mime === "application/pdf") required.add("pdf");
   };
 

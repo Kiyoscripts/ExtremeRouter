@@ -17,7 +17,7 @@ import { handleChatCore } from "open-sse/handlers/chatCore.js";
 import { DEFAULT_HEADROOM_URL } from "@/lib/headroom/detect";
 import { getPxpipeDir } from "@/lib/pxpipe/manager.js";
 import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
-import { handleComboChat, handleFusionChat, handleSwarmChat, handleCascadeChat } from "open-sse/services/combo.js";
+import { handleComboChat, handleFusionChat, handleSwarmChat, handleCascadeChat, detectRequiredCapabilities, applyCapabilityAdapter, DEFAULT_CAPABILITY_FALLBACK_MODEL } from "open-sse/services/combo.js";
 import { handleBypassRequest } from "open-sse/utils/bypassHandler.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import { detectFormatByEndpoint } from "open-sse/translator/formats.js";
@@ -26,7 +26,7 @@ import { updateProviderCredentials, checkAndRefreshToken } from "../services/tok
 import { getProjectIdForConnection } from "open-sse/services/projectId.js";
 import { recordBreakerSuccess, recordBreakerFailure, isRetryableFailure, releaseBreakerProbe, breakerKey } from "open-sse/services/circuitBreaker.js";
 import { recordHealthSample } from "open-sse/services/healthMonitor.js";
-import { buildComboExecutionGraph, authorizeComboExecution } from "../services/comboExecutionPolicy.js";
+import { buildComboExecutionGraph, authorizeComboExecution, resolveComboStrategyConfig } from "../services/comboExecutionPolicy.js";
 import { acquireComboAdmission, wrapResponseWithAdmission } from "../services/comboAdmission.js";
 import { createComboBudget } from "open-sse/services/comboBudget.js";
 
@@ -48,7 +48,30 @@ async function dispatchComboByName(modelStr, { body, clientRawRequest, request, 
   if (!combo?.models?.length) return null;
 
   try {
-    const graph = await buildComboExecutionGraph(combo, settings.comboStrategies?.[modelStr]);
+    const legacyCfg = settings.comboStrategies?.[modelStr];
+    const comboConfig = resolveComboStrategyConfig(combo, legacyCfg);
+
+    // Capability adapter (default ON; per-combo capabilityAdapter.enabled and
+    // the global comboCapabilityAdapterEnabled setting can opt out). Requests
+    // needing hard input modalities (vision/pdf/audio/video) are routed to a
+    // combo member that covers them — or, when none does and the configured
+    // fallback is KNOWN to cover them, the fallback is prepended. Enrichment
+    // happens BEFORE graph build so the fallback leaf flows through the SAME
+    // ACL (authorizeComboExecution below), logical-call charge, budget, and
+    // admission as regular members — no ACL bypass.
+    const adapterEnabled = comboConfig.capabilityAdapter?.enabled ?? settings.comboCapabilityAdapterEnabled ?? true;
+    let comboModels = combo.models;
+    if (adapterEnabled) {
+      const required = detectRequiredCapabilities(body);
+      const fallback = comboConfig.capabilityAdapter?.fallbackModel || DEFAULT_CAPABILITY_FALLBACK_MODEL;
+      const enriched = applyCapabilityAdapter(combo.models, required, fallback);
+      if (enriched !== combo.models) {
+        comboModels = enriched;
+        log.info("CHAT", `Combo "${modelStr}" capability adapter: prepended ${enriched[0]} (no member covers [${[...required].join(", ")}])`);
+      }
+    }
+
+    const graph = await buildComboExecutionGraph({ ...combo, models: comboModels }, legacyCfg);
     const authz = authorizeComboExecution(keyObj, graph);
     if (!authz.allowed) {
       log.warn("AUTH", `Combo "${modelStr}" denied expanded models: ${authz.denied.join(", ")}`);

@@ -16,6 +16,11 @@ const DEFAULT_SETTINGS = {
   comboStrategy: "fallback",
   comboStickyRoundRobinLimit: 1,
   comboStrategies: {},
+  // Capability adapter (default ON): combos automatically route requests that
+  // need hard input modalities (vision/pdf/audio/video) to a member that
+  // covers them, or prepend the configured fallback model when none does.
+  // Per-combo strategyConfig.capabilityAdapter.enabled overrides this global.
+  comboCapabilityAdapterEnabled: true,
   requireLogin: true,
   tunnelDashboardAccess: true,
   authMode: "password",

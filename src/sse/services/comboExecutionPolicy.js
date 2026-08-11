@@ -2,22 +2,28 @@ import { getModelInfo } from "./model.js";
 import { normalizeComboStrategyConfig, estimateLogicalCalls } from "open-sse/services/comboConfig.js";
 import { allowedByRule } from "../utils/modelAccess.js";
 
-export async function buildComboExecutionGraph(combo, legacyConfig = {}) {
-  const members = Array.isArray(combo?.models) ? [...combo.models] : [];
-  // Strategy resolution: MERGE, not pick-one.
-  //   base: combo.strategyConfig — the persisted combo definition (always
-  //     non-empty: create fills in normalized defaults).
-  //   override: legacyConfig (settings.comboStrategies[comboName]) — the
-  //     location the ComboCard editor writes to (live user changes).
-  // Settings fields win field-by-field. This avoids two bugs:
-  //   - picking combo.strategyConfig only → UI edits "don't stick" (Fusion
-  //     shown as fallback);
-  //   - picking settings entry only → a partial entry ({ thinking } only,
-  //     written when the user changes thinking without touching strategy)
-  //     silently resets the strategy to fallback.
+// Resolve the effective strategy config for a combo: MERGE, not pick-one.
+//   base: combo.strategyConfig — the persisted combo definition (always
+//     non-empty: create fills in normalized defaults).
+//   override: legacyConfig (settings.comboStrategies[comboName]) — the
+//     location the ComboCard editor writes to (live user changes).
+// Settings fields win field-by-field. This avoids two bugs:
+//   - picking combo.strategyConfig only → UI edits "don't stick" (Fusion
+//     shown as fallback);
+//   - picking settings entry only → a partial entry ({ thinking } only,
+//     written when the user changes thinking without touching strategy)
+//     silently resets the strategy to fallback.
+// Exported so dispatch sites (chat.js capability adapter) read the same merged
+// config the execution graph uses — one source of truth, no duplicated merge.
+export function resolveComboStrategyConfig(combo, legacyConfig = {}) {
   const base = combo?.strategyConfig && typeof combo?.strategyConfig === "object" ? combo.strategyConfig : {};
   const override = legacyConfig && typeof legacyConfig === "object" ? legacyConfig : {};
-  const config = normalizeComboStrategyConfig({ ...base, ...override });
+  return normalizeComboStrategyConfig({ ...base, ...override });
+}
+
+export async function buildComboExecutionGraph(combo, legacyConfig = {}) {
+  const members = Array.isArray(combo?.models) ? [...combo.models] : [];
+  const config = resolveComboStrategyConfig(combo, legacyConfig);
   const first = members[0] || "";
   const roleModels = config.fallbackStrategy === "fusion"
     ? { judge: config.judgeModel || first }
