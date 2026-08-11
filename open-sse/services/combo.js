@@ -299,6 +299,19 @@ export function getComboModelsFromData(modelStr, combosData) {
  * @returns {Promise<Response>}
  */
 export async function handleComboChat({ body, models, handleSingleModel, log, comboName, comboStrategy, comboStickyLimit = 1, autoSwitch = true, breakerSettings = null, signal, runBudget }) {
+  // Fusion/swarm/cascade are chat-only strategies — chat.js dispatches them to
+  // their own handlers before reaching here. The media/fetch/search handlers
+  // (image, tts, stt, search, fetch) also route through handleComboChat, so a
+  // user who sets one of those strategies on a combo would otherwise silently
+  // degrade to plain fallback with no error. Reject loudly instead.
+  if (comboStrategy === "fusion" || comboStrategy === "swarm" || comboStrategy === "cascade") {
+    log.warn("COMBO", `Combo "${comboName}" strategy ${comboStrategy} not supported here (fallback/round-robin only)`);
+    return new Response(
+      JSON.stringify({ error: { message: `Combo strategy "${comboStrategy}" is only supported for chat requests`, type: "invalid_request_error", code: "combo_strategy_not_supported" } }),
+      { status: 400, headers: { "Content-Type": "application/json" } },
+    );
+  }
+
   // Apply rotation strategy if enabled
   let rotatedModels = getRotatedModels(models, comboName, comboStrategy, comboStickyLimit);
 

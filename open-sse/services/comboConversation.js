@@ -44,6 +44,28 @@ export function appendDirective(body, text, format = inferConversationFormat(bod
   return next;
 }
 
+// Flatten Gemini/anti-gravity `parts` so panel/worker models never see raw
+// functionCall/functionResponse objects (they'd 400 on providers that don't
+// accept a stale tool turn with tools stripped). Mirrors flattenMessages:
+// functionCall → "[Called tool: name]", functionResponse → "[Tool result: ...]".
+// Text parts pass through untouched.
+function flattenGeminiParts(parts) {
+  return (parts || []).filter(Boolean).map((part) => {
+    if (typeof part === "string") return part;
+    if (!part || typeof part !== "object") return part;
+    if (part.functionCall) {
+      return `[Called tool: ${part.functionCall.name || "tool"}]`;
+    }
+    if (part.functionResponse) {
+      const content = part.functionResponse.response;
+      const text = typeof content === "string" ? content : JSON.stringify(content);
+      return `[Tool result: ${text || ""}]`;
+    }
+    if (part.text !== undefined) return part.text;
+    return part;
+  });
+}
+
 function flattenMessages(messages) {
   return (messages || []).filter(Boolean).map((msg) => {
     if (msg.role === "tool" || msg.role === "function") return { role: "assistant", content: `[Tool result: ${extractTextContent(msg.content) || String(msg.content ?? "")}]` };
@@ -67,7 +89,20 @@ export function buildCoordinatorBody(body, format = inferConversationFormat(body
   if (format === FORMATS.OPENAI_RESPONSES) {
     if (Array.isArray(next.input)) next.input = flattenMessages(next.input);
   } else if (format === FORMATS.ANTIGRAVITY) {
-    next.request = { ...(next.request || {}), tools: undefined };
+    next.request = {
+      ...(next.request || {}),
+      tools: undefined,
+      contents: Array.isArray(next.request.contents)
+        ? next.request.contents.map((c) => ({ ...c, parts: flattenGeminiParts(c.parts) }))
+        : next.request.contents,
+    };
+  } else if (format === FORMATS.GEMINI) {
+    // tools already stripped by the destructure above (gemini carries them at
+    // the top level); flatten history so functionCall/functionResponse never
+    // reach the panel/worker without the tool definitions that explain them.
+    next.contents = Array.isArray(next.contents)
+      ? next.contents.map((c) => ({ ...c, parts: flattenGeminiParts(c.parts) }))
+      : next.contents;
   } else if (Array.isArray(next.messages)) {
     next.messages = flattenMessages(next.messages);
   }
