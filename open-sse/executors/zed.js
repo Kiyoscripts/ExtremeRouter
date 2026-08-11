@@ -2,8 +2,8 @@
 //
 // Posts a CompletionBody envelope to cloud.zed.dev/completions:
 //   { thread_id, prompt_id, provider, model, provider_request }
-// where `provider` is "Anthropic" | "Google" | "OpenAi" | "XAi" (Zed's own
-// casing) and `provider_request` is the NATIVE body for that upstream —
+// where `provider` is "anthropic" | "google" | "open_ai" | "x_ai" (snake_case,
+// matching Zed's LanguageModelProvider serde) and `provider_request` is the
 // translated per-upstream here so no lossy middle format is involved:
 //   claude → openaiToClaudeRequest | gemini → openaiToGeminiRequest
 //   openai → openaiToOpenAIResponsesRequest | x-ai → OpenAI-shaped passthrough
