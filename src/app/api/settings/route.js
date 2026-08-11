@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
-import { getSettings, updateSettings } from "@/lib/localDb";
+import { getSettings, updateSettings, getApiKeys, createApiKey } from "@/lib/localDb";
 import { applyOutboundProxyEnv } from "@/lib/network/outboundProxy";
 import { resetComboRotation } from "open-sse/services/combo.js";
 import { runQuotaAutoPingTick } from "@/shared/services/quotaAutoPing";
+import { shouldProvisionDefaultKey, provisionDefaultKey } from "@/lib/endpoint/defaultKey";
 import bcrypt from "bcryptjs";
 
 export const dynamic = "force-dynamic";
@@ -77,7 +78,22 @@ export async function PATCH(request) {
       }
     }
 
+    // Auto-provision (Option A): on the requireApiKey false→true transition,
+    // create a "Default Key" so /v1 works with zero dashboard steps. The raw
+    // key is returned ONCE in this response; it is never persisted in the
+    // settings JSON (its home is the apiKeys table) and never appears in
+    // GET /api/settings. Only fires when no keys exist at all.
+    const prevSettings = await getSettings();
     const settings = await updateSettings(body);
+
+    let provisionedKey = null;
+    if (shouldProvisionDefaultKey(prevSettings.requireApiKey, settings.requireApiKey)) {
+      const result = await provisionDefaultKey({ getApiKeys, createApiKey });
+      if (result.provisioned) {
+        provisionedKey = result.key;
+        console.log("[Endpoint] Auto-provisioned Default Key (requireApiKey enabled, no keys existed)");
+      }
+    }
 
     // Apply outbound proxy settings immediately (no restart required)
     if (
@@ -109,6 +125,8 @@ export async function PATCH(request) {
 
     const { password, oidcClientSecret, ...safeSettings } = settings;
     safeSettings.oidcConfigured = !!(safeSettings.oidcIssuerUrl && safeSettings.oidcClientId && oidcClientSecret);
+    // Raw key rides along EXACTLY once — only on the transition that created it.
+    if (provisionedKey) safeSettings.provisionedKey = provisionedKey;
     return NextResponse.json(safeSettings, { headers: SETTINGS_RESPONSE_HEADERS });
   } catch (error) {
     console.log("Error updating settings:", error);

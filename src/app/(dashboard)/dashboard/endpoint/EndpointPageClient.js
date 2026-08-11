@@ -248,7 +248,13 @@ export default function APIPageClient({ machineId }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ requireApiKey: value }),
       });
-      if (res.ok) setRequireApiKey(value);
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setRequireApiKey(value);
+        // Option A: first enablement auto-provisioned a Default Key — surface
+        // it through the existing once-only "Created Key" modal (copy + dismiss).
+        if (data.provisionedKey) setCreatedKey(data.provisionedKey);
+      }
     } catch (error) {
       console.log("Error updating requireApiKey:", error);
     }
