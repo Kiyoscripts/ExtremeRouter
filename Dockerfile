@@ -31,16 +31,11 @@ COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 # Copy public files
 COPY --from=builder /app/public ./public
-# Copy custom-server.js if needed
-COPY --from=builder /app/custom-server.js ./custom-server.js
-# Copy MITM files
-COPY --from=builder /app/open-sse ./open-sse
-COPY --from=builder /app/src/mitm ./src/mitm
 
 # Create data directory
 RUN mkdir -p /app/data && chown -R node:node /app
 
-# Fix permissions
+# Fix permissions at runtime
 RUN apk --no-cache upgrade && apk --no-cache add su-exec && \
   printf '#!/bin/sh\nchown -R node:node /app/data 2>/dev/null\nexec su-exec node "$@"\n' > /entrypoint.sh && \
   chmod +x /entrypoint.sh
@@ -50,5 +45,5 @@ USER node
 EXPOSE 20128
 
 ENTRYPOINT ["/entrypoint.sh"]
-# Use server.js from the standalone build
+# Use server.js from the standalone build instead of custom-server.js
 CMD ["node", "server.js"]
