@@ -19,7 +19,11 @@ export function createComboBudget({ body, config, leaves = [], logicalCalls = 1 
     const output = Math.min(caps.maxOutput || 4000, 4000);
     estimatedCostUsd += inputTokens * (pricing.input / 1_000_000) + output * (pricing.output / 1_000_000);
   }
-  if (logicalCalls > limits.maxLogicalCalls) return { ok: false, code: "combo_call_budget_exceeded", logicalCalls, limit: limits.maxLogicalCalls };
+
+  // Call cap is enforced ONLY when budgets are enabled. Previously it ran
+  // unconditionally, so budget-off combos with 16+ members were rejected with
+  // combo_call_budget_exceeded no matter the unlimited-cost default.
+  if (limits.enabled && logicalCalls > limits.maxLogicalCalls) return { ok: false, code: "combo_call_budget_exceeded", logicalCalls, limit: limits.maxLogicalCalls };
   if (limits.enabled && estimatedCostUsd > limits.maxEstimatedCostUsd) return { ok: false, code: "combo_cost_budget_exceeded", estimatedCostUsd, limit: limits.maxEstimatedCostUsd };
 
   let aggregateOutputChars = 0;

@@ -13,10 +13,10 @@
 //
 // Limits (configurable via env):
 //   DEFAULT_RPM = 60 requests/minute per key (generous for coding assistants)
-//   DEFAULT_BURST = 10 (max burst before refill kicks in)
+//   DEFAULT_BURST = 25 (max burst before refill kicks in; raised for combo-heavy users)
 
 const DEFAULT_RPM = parseInt(process.env.EXTREMEROUTER_RATE_LIMIT_RPM || "60", 10);
-const DEFAULT_BURST = parseInt(process.env.EXTREMEROUTER_RATE_LIMIT_BURST || "10", 10);
+export const DEFAULT_BURST = parseInt(process.env.EXTREMEROUTER_RATE_LIMIT_BURST || "25", 10);
 const WINDOW_MS = 60_000; // 1 minute
 const EVICT_MS = 5 * 60_000; // evict buckets unused for 5 min
 

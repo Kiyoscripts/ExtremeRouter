@@ -25,6 +25,27 @@ function budget() {
 }
 
 describe("combo budget aggregate clamp", () => {
+  it("skips the call cap entirely when budgets are disabled (unlimited legacy)", () => {
+    const b = createComboBudget({
+      body: { messages: [{ role: "user", content: "x" }] },
+      config: { budgets: { enabled: false } }, // default: unlimited
+      leaves: [],
+      logicalCalls: 40,
+    });
+    expect(b.ok).toBe(true);
+  });
+
+  it("enforces the call cap when budgets are enabled", () => {
+    const b = createComboBudget({
+      body: { messages: [{ role: "user", content: "x" }] },
+      config: { budgets: { enabled: true, maxLogicalCalls: 16, maxEstimatedCostUsd: 99 } },
+      leaves: [],
+      logicalCalls: 17,
+    });
+    expect(b.ok).toBe(false);
+    expect(b.code).toBe("combo_call_budget_exceeded");
+  });
+
   it("never lets aggregate output exceed maxAggregateOutputChars", () => {
     const b = budget();
     expect(b.clampOutput("A".repeat(4000)).length).toBe(4000); // A1: 4000

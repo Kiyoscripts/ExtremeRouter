@@ -9,7 +9,7 @@ import {
 } from "../services/auth.js";
 import { cacheClaudeHeaders } from "open-sse/utils/claudeHeaderCache.js";
 import { readBodyWithLimit } from "../utils/bodyLimiter.js";
-import { checkRateLimit, evictExpiredBuckets } from "../utils/rateLimiter.js";
+import { checkRateLimit, evictExpiredBuckets, DEFAULT_BURST } from "../utils/rateLimiter.js";
 import { getSettings, getApiKeyByKey, getComboByName } from "@/lib/localDb";
 import { assertModelAllowed } from "../utils/modelAccess.js";
 import { getModelInfo } from "../services/model.js";
@@ -79,9 +79,13 @@ async function dispatchComboByName(modelStr, { body, clientRawRequest, request, 
     }
 
     // One token was charged before resolution. Charge the remaining expansion
-    // cost atomically before any provider call.
+    // cost atomically before any provider call — CAPPED at the burst capacity
+    // so a large combo cannot reset the bucket to its own size and starve
+    // subsequent requests (combo-heavy round-robin/fusion users were hitting
+    // "Combo rate limit exceeded" on legitimate fan-outs).
     if (graph.logicalCalls > 1) {
-      const expansionLimit = checkRateLimit(rateLimitKey, undefined, undefined, graph.logicalCalls - 1);
+      const charge = Math.min(graph.logicalCalls - 1, DEFAULT_BURST);
+      const expansionLimit = checkRateLimit(rateLimitKey, undefined, undefined, charge);
       if (!expansionLimit.allowed) return errorResponse(HTTP_STATUS.TOO_MANY_REQUESTS, "Combo rate limit exceeded");
     }
 
