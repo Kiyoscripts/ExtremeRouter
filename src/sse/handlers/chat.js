@@ -93,12 +93,6 @@ async function dispatchComboByName(modelStr, { body, clientRawRequest, request, 
     if (!budget.ok) return errorResponse(HTTP_STATUS.BAD_REQUEST, `Combo budget rejected: ${budget.code}`);
 
     const lease = acquireComboAdmission(keyObj?.id || rateLimitKey);
-    if (!lease.ok) {
-      return new Response(JSON.stringify({ error: { message: "Combo capacity unavailable", code: lease.code } }), {
-        status: lease.status,
-        headers: { "Content-Type": "application/json", "Retry-After": String(lease.retryAfter) },
-      });
-    }
 
     const runController = new AbortController();
     const abort = () => runController.abort(request.signal?.reason || new Error("client disconnected"));
