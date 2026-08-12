@@ -21,11 +21,36 @@ function messagePayload(body) {
   return null;
 }
 
-function captureSizeSnapshot(body) {
+// Trailing run of items after the last assistant/model turn = the current user
+// turn (same semantics as combo.js trailingUserItems). History = everything
+// before that run.
+function trailingUserRun(items) {
+  if (!Array.isArray(items) || items.length === 0) return [];
+  const isAssistant = (r) => r === "assistant" || r === "model";
+  let i = items.length - 1;
+  while (i >= 0 && !isAssistant(items[i]?.role)) i--;
+  return items.slice(i + 1);
+}
+
+// Byte snapshot with a size breakdown: whole body, message array, tool schema,
+// tool_choice, system prompt, history (messages minus the current user turn)
+// and the current turn itself. History/current-turn are measured as the SUM of
+// per-item JSON — zero for empty, and free of array-serialization overhead
+// ("[]" would otherwise count as 2 bytes of "nothing"). Exported for tests.
+export function captureSizeSnapshot(body) {
   const messages = messagePayload(body);
+  const currentTurn = trailingUserRun(messages);
+  const sumBytes = (items) => (Array.isArray(items) ? items.reduce((acc, item) => acc + jsonBytes(item), 0) : 0);
   return {
     bodyBytes: jsonBytes(body),
     messageBytes: messages ? jsonBytes(messages) : 0,
+    // Breakdown fields — tool schema/history repeated across calls dominate
+    // outbound payloads; report them separately from the message text.
+    toolsBytes: jsonBytes(body?.tools),
+    toolChoiceBytes: jsonBytes(body?.tool_choice),
+    systemBytes: jsonBytes(body?.system),
+    historyBytes: messages ? sumBytes(messages.slice(0, messages.length - currentTurn.length)) : 0,
+    currentTurnBytes: sumBytes(currentTurn),
   };
 }
 
@@ -244,6 +269,52 @@ export function formatHeadroomSizeLog(diagnostics) {
   const after = diagnostics?.after;
   if (!before || !after) return "";
   return `body=${before.bodyBytes}B→${after.bodyBytes}B messages=${before.messageBytes}B→${after.messageBytes}B`;
+}
+
+// Effective payload savings: byte delta of the ACTUAL outbound JSON (body
+// before vs after compression), independent of the proxy's reported token
+// delta. Tool schema/history are broken out — they dominate payload size and
+// are exactly what compression targets. Returns a human line or null when
+// either snapshot is missing.
+// Build the per-request byte sample for the Headroom effective payload savings
+// dashboard card. Derived from the request-body byte snapshots produced during
+// compression (before/after), with tool schema + history broken out. Returns
+// null when either snapshot is missing or the original body has no bytes (old
+// snapshots without the breakdown fields default to 0, so they still aggregate).
+// This is the single seam that maps diagnostics → a lifetime-aggregateable shape;
+// chatCore forwards the result through saveUsageStats → saveRequestUsage.
+export function buildHeadroomBytesSample(diagnostics) {
+  const before = diagnostics?.before;
+  const after = diagnostics?.after;
+  if (!before || !after || !(before.bodyBytes > 0)) return null;
+  const seg = (b, a) => ({
+    before: Number.isFinite(b) ? b : 0,
+    after: Number.isFinite(a) ? a : 0,
+  });
+  const body = seg(before.bodyBytes, after.bodyBytes);
+  const tools = seg(before.toolsBytes, after.toolsBytes);
+  const history = seg(before.historyBytes, after.historyBytes);
+  return {
+    bodyBefore: body.before, bodyAfter: body.after,
+    toolsBefore: tools.before, toolsAfter: tools.after,
+    historyBefore: history.before, historyAfter: history.after,
+  };
+}
+
+export function formatEffectivePayloadSavings(diagnostics) {
+  const before = diagnostics?.before;
+  const after = diagnostics?.after;
+  if (!before || !after || !before.bodyBytes || !after.bodyBytes) return null;
+  const saved = before.bodyBytes - after.bodyBytes;
+  const pct = before.bodyBytes > 0 ? ((saved / before.bodyBytes) * 100).toFixed(1) : "0";
+  const parts = [`effectivePayloadSavings=${pct}% body=${before.bodyBytes}B→${after.bodyBytes}B`];
+  if (typeof before.toolsBytes === "number" && typeof after.toolsBytes === "number") {
+    parts.push(`tools=${before.toolsBytes}B→${after.toolsBytes}B`);
+  }
+  if (typeof before.historyBytes === "number" && typeof after.historyBytes === "number") {
+    parts.push(`history=${before.historyBytes}B→${after.historyBytes}B`);
+  }
+  return parts.join(" ");
 }
 
 export function isHeadroomPhantomSavings(stats, diagnostics, minShrinkRatio = 0.05) {

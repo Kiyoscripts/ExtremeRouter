@@ -429,6 +429,26 @@ export async function saveRequestUsage(entry) {
         }
       }
 
+      // Headroom effective payload savings (byte-level). Stored as a single JSON
+      // counter so the Overview dashboard can show actual outbound shrink, with
+      // tool schema + history broken out. Only counted when the request was
+      // actually compressed (sample built from before/after byte snapshots).
+      if (entry.savedBytesByMechanism?.headroom) {
+        const hb = entry.savedBytesByMechanism.headroom;
+        const bCur = db.get(`SELECT value FROM _meta WHERE key = 'bytesSavedLifetime.headroom'`);
+        const agg = bCur ? parseJson(bCur.value, {}) : {};
+        const next = {
+          requests: (agg.requests || 0) + 1,
+          bodyBefore: (agg.bodyBefore || 0) + (hb.bodyBefore || 0),
+          bodyAfter: (agg.bodyAfter || 0) + (hb.bodyAfter || 0),
+          toolsBefore: (agg.toolsBefore || 0) + (hb.toolsBefore || 0),
+          toolsAfter: (agg.toolsAfter || 0) + (hb.toolsAfter || 0),
+          historyBefore: (agg.historyBefore || 0) + (hb.historyBefore || 0),
+          historyAfter: (agg.historyAfter || 0) + (hb.historyAfter || 0),
+        };
+        db.run(`INSERT INTO _meta(key, value) VALUES('bytesSavedLifetime.headroom', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [stringifyJson(next)]);
+      }
+
       // Semantic Cache hit counter — separate from savedTokens because a cache hit
       // also short-circuits the upstream call entirely.
       if (entry.fromCache) {

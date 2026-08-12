@@ -74,7 +74,7 @@ export function buildRequestDetail(base, overrides = {}) {
   };
 }
 
-export function saveUsageStats({ provider, model, tokens, connectionId, apiKey, endpoint, latency, savedTokens, savedTokensByMechanism, fromCache, retryCount, label = "USAGE" }) {
+export function saveUsageStats({ provider, model, tokens, connectionId, apiKey, endpoint, latency, savedTokens, savedTokensByMechanism, savedBytesByMechanism, fromCache, retryCount, label = "USAGE" }) {
   if (!tokens || typeof tokens !== "object") return;
 
   const inTokens = tokens.input_tokens ?? tokens.prompt_tokens ?? 0;
@@ -105,6 +105,7 @@ export function saveUsageStats({ provider, model, tokens, connectionId, apiKey, 
     latency: latency || { ttft: 0, total: 0 },
     savedTokens: savedTokens || 0,
     savedTokensByMechanism: savedTokensByMechanism || null,
+    savedBytesByMechanism: savedBytesByMechanism || null,
     fromCache: !!fromCache,
     retryCount: retryCount || 0,
   }).catch(() => {});

@@ -7,6 +7,11 @@ import { FREE_PROVIDERS, FREE_TIER_PROVIDERS, WEB_COOKIE_PROVIDERS } from "@/sha
 
 export const dynamic = "force-dynamic";
 
+// Headroom byte counters live as one JSON blob in _meta; parse defensively.
+function parseBytesSaved(raw) {
+  try { return JSON.parse(raw) || {}; } catch { return {}; }
+}
+
 /**
  * GET /api/usage/meta
  * Returns lifetime totals + free/cookie provider breakdown for the Overview page.
@@ -19,6 +24,7 @@ export async function GET() {
       cacheHitsRaw,
       costSavedRaw,
       costRtk, costHeadroom, costPxpipe, costCache, costCaveman, costPonytail,
+      headroomBytesRaw,
       stats, settings, connections,
     ] = await Promise.all([
       getMeta("totalRequestsLifetime", "0"),
@@ -37,6 +43,7 @@ export async function GET() {
       getMeta("costSavedLifetime.cache", "0"),
       getMeta("costSavedLifetime.caveman", "0"),
       getMeta("costSavedLifetime.ponytail", "0"),
+      getMeta("bytesSavedLifetime.headroom", "{}"),
       getUsageStats("all"),
       getSettings(),
       getProviderConnections(),
@@ -108,6 +115,12 @@ export async function GET() {
         cache: parseFloat(costCache) || 0,
         caveman: parseFloat(costCaveman) || 0,
         ponytail: parseFloat(costPonytail) || 0,
+      },
+      // Headroom effective payload savings (byte-level): actual outbound JSON
+      // shrink with tool schema + history broken out. Absent until compression
+      // has produced at least one before/after byte snapshot.
+      bytesSavedByMechanism: {
+        headroom: parseBytesSaved(headroomBytesRaw),
       },
       freeProviders,
       tokenSaverSettings: {

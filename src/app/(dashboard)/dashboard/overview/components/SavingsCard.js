@@ -10,6 +10,13 @@ function formatDollars(amount) {
   return `$${amount.toFixed(4)}`;
 }
 
+function formatBytes(n) {
+  const v = Number(n) || 0;
+  if (v >= 1048576) return `${(v / 1048576).toFixed(1)}MB`;
+  if (v >= 1024) return `${(v / 1024).toFixed(1)}KB`;
+  return `${Math.round(v)}B`;
+}
+
 const MECHANISM_META = [
   { key: "rtk", label: "RTK", icon: "compress", color: "#3B82F6" },
   { key: "headroom", label: "Headroom", icon: "expand_less", color: "#10B981" },
@@ -25,6 +32,14 @@ export default function SavingsCard({ data }) {
   const costSaved = data?.costSavedLifetime || 0;
   const byMechanism = data?.costSavedByMechanism || {};
   const tokensSaved = data?.tokensSavedLifetime || 0;
+
+  // Headroom effective payload savings (byte-level): actual outbound JSON
+  // shrink, tool schema + history broken out. Null until compression has
+  // produced at least one before/after byte snapshot.
+  const headroomBytes = data?.bytesSavedByMechanism?.headroom || null;
+  const headroomPct = headroomBytes?.bodyBefore > 0
+    ? (((headroomBytes.bodyBefore - headroomBytes.bodyAfter) / headroomBytes.bodyBefore) * 100).toFixed(1)
+    : null;
 
   // Calculate "without ExtremeRouter" cost = actual cost + saved cost
   const actualCost = data?.totalCost || 0;
@@ -116,6 +131,21 @@ export default function SavingsCard({ data }) {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {headroomPct !== null && (
+        <div className="mt-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2">
+          <p className="flex items-center gap-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+            <span className="material-symbols-outlined text-[14px]">expand_less</span>
+            Headroom effective payload savings: {headroomPct}% outbound
+          </p>
+          <p className="mt-0.5 text-xs text-text-muted">
+            body {formatBytes(headroomBytes.bodyBefore)} → {formatBytes(headroomBytes.bodyAfter)}
+            {headroomBytes.toolsBefore > 0 && ` · tools ${formatBytes(headroomBytes.toolsBefore)} → ${formatBytes(headroomBytes.toolsAfter)}`}
+            {headroomBytes.historyBefore > 0 && ` · history ${formatBytes(headroomBytes.historyBefore)} → ${formatBytes(headroomBytes.historyAfter)}`}
+            {headroomBytes.requests > 0 && ` · ${headroomBytes.requests.toLocaleString()} compressed request${headroomBytes.requests === 1 ? "" : "s"}`}
+          </p>
         </div>
       )}
     </Card>

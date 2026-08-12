@@ -27,7 +27,7 @@ import { injectCaveman } from "../rtk/caveman.js";
 import { compressWithPxpipe, formatPxpipeLog, formatPxpipeSizeLog, isPxpipePhantomSavings } from "../rtk/pxpipe.js";
 import { injectPonytail } from "../rtk/ponytail.js";
 import { compressMessages, formatRtkLog } from "../rtk/index.js";
-import { compressWithHeadroom, formatHeadroomLog, formatHeadroomSizeLog, isHeadroomPhantomSavings } from "../rtk/headroom.js";
+import { compressWithHeadroom, formatHeadroomLog, formatHeadroomSizeLog, formatEffectivePayloadSavings, isHeadroomPhantomSavings, buildHeadroomBytesSample } from "../rtk/headroom.js";
 import { getCapabilitiesForModel } from "../providers/capabilities.js";
 import { stripUnsupportedModalities } from "../translator/concerns/modality.js";
 import { prefetchRemoteImages } from "../translator/concerns/prefetch.js";
@@ -238,8 +238,9 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   const headroomStats = await compressWithHeadroom(translatedBody, { enabled: headroomEnabled, url: headroomUrl, model: upstreamModel, format: finalFormat, compressUserMessages: headroomCompressUserMessages, diagnostics: headroomDiagnostics });
   const headroomLine = formatHeadroomLog(headroomStats);
   const headroomSizeLine = formatHeadroomSizeLog(headroomDiagnostics);
+  const headroomEffectiveLine = formatEffectivePayloadSavings(headroomDiagnostics);
   if (headroomLine) {
-    log?.info?.("HEADROOM", `${headroomLine}${headroomSizeLine ? ` | ${headroomSizeLine}` : ""}`);
+    log?.info?.("HEADROOM", `${headroomLine}${headroomSizeLine ? ` | ${headroomSizeLine}` : ""}${headroomEffectiveLine ? ` | ${headroomEffectiveLine}` : ""}`);
     if (isHeadroomPhantomSavings(headroomStats, headroomDiagnostics)) {
       log?.warn?.("HEADROOM", `reported token delta, but outbound JSON shrank <5%; provider may bill near-original payload | ${headroomSizeLine}`);
     }
@@ -294,6 +295,13 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   if (rtkTokensSaved > 0) savedTokensByMechanism.rtk = rtkTokensSaved;
   if (headroomTokensSaved > 0) savedTokensByMechanism.headroom = headroomTokensSaved;
   if (pxpipeTokensSaved > 0) savedTokensByMechanism.pxpipe = pxpipeTokensSaved;
+
+  // Byte-level effective payload savings (Headroom). Independent of token
+  // deltas — measures actual outbound JSON shrink, with tool schema/history
+  // broken out. Flows through saveUsageStats like the token breakdown.
+  const savedBytesByMechanism = {};
+  const headroomBytesSample = buildHeadroomBytesSample(headroomDiagnostics);
+  if (headroomBytesSample) savedBytesByMechanism.headroom = headroomBytesSample;
 
 
   const executor = getExecutor(provider);
@@ -568,7 +576,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   const sharedCtx = {
     provider, model, body, stream, translatedBody, finalBody, requestStartTime,
     connectionId, apiKey, clientRawRequest, onRequestSuccess, savedTokens,
-    savedTokensByMechanism,
+    savedTokensByMechanism, savedBytesByMechanism,
     cavemanActive: !!cavemanEnabled, ponytailActive: !!ponytailEnabled,
     retryCount: executorRetryCount,
   };

@@ -122,7 +122,7 @@ export async function handleStreamingResponse({ providerResponse, provider, mode
 /**
  * Build onStreamComplete callback for streaming usage tracking.
  */
-export function buildOnStreamComplete({ provider, model, connectionId, apiKey, requestStartTime, body, stream, finalBody, translatedBody, clientRawRequest, savedTokens, savedTokensByMechanism, cavemanActive, ponytailActive, retryCount }) {
+export function buildOnStreamComplete({ provider, model, connectionId, apiKey, requestStartTime, body, stream, finalBody, translatedBody, clientRawRequest, savedTokens, savedTokensByMechanism, savedBytesByMechanism, cavemanActive, ponytailActive, retryCount }) {
   const streamDetailId = `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 
   const onStreamComplete = (contentObj, usage, ttftAt) => {
@@ -156,6 +156,7 @@ export function buildOnStreamComplete({ provider, model, connectionId, apiKey, r
       endpoint: clientRawRequest?.endpoint, latency,
       savedTokens: augmented.savedTokens,
       savedTokensByMechanism: augmented.savedTokensByMechanism,
+      savedBytesByMechanism,
       retryCount, label: "STREAM USAGE",
     });
   };
