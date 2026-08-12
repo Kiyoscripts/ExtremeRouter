@@ -1,34 +1,54 @@
-FROM node:22-alpine
-
+# syntax=docker/dockerfile:1.7
+ARG NODE_IMAGE=node:22-alpine
+FROM ${NODE_IMAGE} AS base
 WORKDIR /app
 
-# Install build dependencies
-RUN apk add --no-cache python3 make g++
+FROM base AS builder
 
-# Copy package files
+RUN apk --no-cache upgrade && apk --no-cache add python3 make g++ linux-headers
+
 COPY package.json ./
-
-# Install dependencies
 RUN npm install
 
-# Copy application
-COPY . .
-
-# Build
+COPY . ./
+ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
-# Set environment variables
+FROM ${NODE_IMAGE} AS runner
+WORKDIR /app
+
+LABEL org.opencontainers.image.title="extremerouter"
+
 ENV NODE_ENV=production
 ENV PORT=20128
 ENV HOSTNAME=0.0.0.0
-ENV DATA_DIR=/app/data
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV DATA_DIR=/app/data
+
+# Copy the ENTIRE standalone directory (this includes server.js and all dependencies)
+COPY --from=builder /app/.next/standalone ./
+# Copy static files
+COPY --from=builder /app/.next/static ./.next/static
+# Copy public files
+COPY --from=builder /app/public ./public
+# Copy custom-server.js if needed
+COPY --from=builder /app/custom-server.js ./custom-server.js
+# Copy MITM files
+COPY --from=builder /app/open-sse ./open-sse
+COPY --from=builder /app/src/mitm ./src/mitm
 
 # Create data directory
-RUN mkdir -p /app/data
+RUN mkdir -p /app/data && chown -R node:node /app
 
-# Expose port
+# Fix permissions
+RUN apk --no-cache upgrade && apk --no-cache add su-exec && \
+  printf '#!/bin/sh\nchown -R node:node /app/data 2>/dev/null\nexec su-exec node "$@"\n' > /entrypoint.sh && \
+  chmod +x /entrypoint.sh
+
+USER node
+
 EXPOSE 20128
 
-# Start the app
-CMD ["node", "custom-server.js"]
+ENTRYPOINT ["/entrypoint.sh"]
+# Use server.js from the standalone build
+CMD ["node", "server.js"]
